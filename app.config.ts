@@ -1,0 +1,63 @@
+const PROFILE = process.env.APP_ENV;
+
+const getName = () => {
+  if (PROFILE === "development") {
+    return "kukps-talai (development)";
+  } else if (PROFILE === "preview") {
+    return "kukps-talai (preview)";
+  } else if (PROFILE === "production") {
+    return "kukps-talai";
+  }
+  return "kukps-talai";
+};
+const getPackageName = () => {
+  if (PROFILE === "development") {
+    return "com.kukps.talai.development";
+  } else if (PROFILE === "preview") {
+    return "com.kukps.talai.preview";
+  } else if (PROFILE === "production") {
+    return "com.kukps.talai";
+  }
+  return "com.kukps.talai";
+};
+export default {
+  expo: {
+    name: getName(),
+    slug: "mobile",
+    version: "1.0.0",
+    orientation: "portrait",
+    icon: "./assets/favicon.png",
+    userInterfaceStyle: "light",
+    splash: {
+      image: "./assets/favicon.png",
+      resizeMode: "contain",
+      backgroundColor: "#ffffff",
+    },
+    ios: {
+      supportsTablet: true,
+    },
+    android: {
+      package: getPackageName(),
+      adaptiveIcon: {
+        backgroundColor: "#E6F4FE",
+        foregroundImage: "./assets/favicon.png",
+        backgroundImage: "./assets/favicon.png",
+        monochromeImage: "./assets/favicon.png",
+      },
+      predictiveBackGestureEnabled: false,
+      config: {
+        googleMaps: {
+          apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAP_API,
+        },
+      },
+    },
+    web: {
+      favicon: "./assets/favicon.png",
+    },
+    extra: {
+      eas: {
+        projectId: "86504763-1c4d-4a08-952d-72894a42fda5",
+      },
+    },
+  },
+};
