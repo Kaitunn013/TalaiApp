@@ -35,6 +35,7 @@ export default function HomeScreen() {
     const [liveCars, setLiveCars] = useState<LiveCarLocation[]>([]);
     const [carRouteMap, setCarRouteMap] = useState<Record<string, string>>({});
     const initialCarSelectedRef = useRef(false);
+    const webViewRef = useRef<WebView>(null);
 
     const fetchRoute = async () => {
         try {
@@ -137,19 +138,8 @@ export default function HomeScreen() {
                     }
                     seenCoords.add(coordKey);
 
-                    // Find all sequence numbers at the exact same coordinates
-                    const duplicateSequences = pathPoints
-                        .filter(
-                            (p) =>
-                                p.lat.toFixed(6) === point.lat.toFixed(6) &&
-                                p.lng.toFixed(6) === point.lng.toFixed(6) &&
-                                p.routestop_sequence !== null &&
-                                p.routestop_sequence !== undefined
-                        )
-                        .map((p) => p.routestop_sequence as number)
-                        .sort((a, b) => a - b);
-
                     const html = `<div class="bus-stop-pin"><img src="${busStopIconUri}" class="bus-stop-img" /><div class="bus-stop-pole"></div></div>`;
+                    const stopName = point.name || 'ไม่มีชื่อจุดจอด';
 
                     return `L.marker([${point.lat}, ${point.lng}], {
               icon: L.divIcon({
@@ -157,8 +147,9 @@ export default function HomeScreen() {
                 html: ${JSON.stringify(html)},
                 iconSize: [26, 38],
                 iconAnchor: [13, 38],
+                popupAnchor: [0, -38],
               })
-            }).addTo(map);`;
+            }).bindPopup(${JSON.stringify(stopName)}).addTo(map);`;
                 })
                 .filter((str) => str !== '');
         })()
@@ -199,7 +190,7 @@ export default function HomeScreen() {
     // A simple side-view bus glyph, similar in spirit to a standard round bus/transit icon.
     const busGlyphSvg =
         '<svg viewBox="0 0 24 24" width="16" height="16" fill="white" xmlns="http://www.w3.org/2000/svg">' +
-        '<path d="M4 16.5V6.5C4 5.12 5.12 4 6.5 4h11C18.88 4 20 5.12 20 6.5v10c0 .83-.4 1.56-1 2.02V20a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H8v1a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-1.48A2.5 2.5 0 0 1 4 16.5ZM6.5 6a.5.5 0 0 0-.5.5V11h12V6.5a.5.5 0 0 0-.5-.5h-11ZM6 13v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2H6Zm1.5 3.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm9 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z"/>' +
+        '<path d="M4 16.5V6.5C4 5.12 5.12 4 6.5 4h11C18.88 4 20 5.12 20 6.5v10c0 .83-.4 1.56-1 2.02V20a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H8v1a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-1.48A2.5 2.5 0 1 1 4 16.5ZM6.5 6a.5.5 0 0 0-.5.5V11h12V6.5a.5.5 0 0 0-.5-.5h-11ZM6 13v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2H6Zm1.5 3.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm9 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z"/>' +
         '</svg>';
 
     const liveCarMarkers = (selectedCar ? [selectedCar] : filteredLiveCars)
@@ -232,6 +223,25 @@ export default function HomeScreen() {
       }
       .leaflet-top.leaflet-left {
         top: 80px !important;
+      }
+      /* Custom compact popup styling */
+      .leaflet-popup-content-wrapper {
+        padding: 4px 8px !important;
+        border-radius: 8px !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+      }
+      .leaflet-popup-content {
+        margin: 4px 6px !important;
+        font-size: 13px !important;
+        font-weight: 600 !important;
+        color: #1e293b !important;
+        line-height: 1.4 !important;
+      }
+      .leaflet-container a.leaflet-popup-close-button {
+        top: 2px !important;
+        right: 2px !important;
+        padding: 2px 4px !important;
+        font-size: 14px !important;
       }
       /* Bus stop sign with pole */
       .bus-stop-pin {
@@ -307,9 +317,19 @@ export default function HomeScreen() {
         setSelectedRoute(route);
     };
 
+    const handleSelectStop = (stop: { lat: number; lng: number; name?: string | null }) => {
+        if (webViewRef.current) {
+            const jsCode = `
+              map.flyTo([${stop.lat}, ${stop.lng}], 18, { animate: true, duration: 1 });
+            `;
+            webViewRef.current.injectJavaScript(jsCode);
+        }
+    };
+
     return (
         <View style={{ flex: 1 }}>
             <WebView
+                ref={webViewRef}
                 originWhitelist={['*']}
                 source={{ html: leafletHtml as any }}
                 style={StyleSheet.absoluteFill}
@@ -330,6 +350,7 @@ export default function HomeScreen() {
                     selectedRouteId={selectedRoute?.id || null}
                     selectedCarId={selectedCarId}
                     onSelectCar={setSelectedCarId}
+                    onSelectStop={handleSelectStop}
                     onOpen={fetchRoute}
                 />
             )}

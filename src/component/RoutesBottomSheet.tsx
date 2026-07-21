@@ -52,6 +52,7 @@ export default function RoutesBottomSheet({
   selectedRouteId,
   selectedCarId,
   onSelectCar,
+  onSelectStop,
   onOpen,
 }: {
   routes: Route[];
@@ -60,15 +61,16 @@ export default function RoutesBottomSheet({
   selectedRouteId: string | null;
   selectedCarId?: string | null;
   onSelectCar?: (carId: string | null) => void;
+  onSelectStop?: (stop: { lat: number; lng: number; name?: string | null }) => void;
   onOpen?: () => void;
 }) {
-  const translateY = useRef(new Animated.Value(COLLAPSED_TRANSLATE_Y)).current;
-  const lastTranslateY = useRef(COLLAPSED_TRANSLATE_Y);
+  const translateY = useRef(new Animated.Value(EXPANDED_TRANSLATE_Y)).current;
+  const lastTranslateY = useRef(EXPANDED_TRANSLATE_Y);
   const CARD_WIDTH = Math.round(Dimensions.get('window').width * 0.44);
 
   useEffect(() => {
-    translateY.setValue(COLLAPSED_TRANSLATE_Y);
-    lastTranslateY.current = COLLAPSED_TRANSLATE_Y;
+    translateY.setValue(EXPANDED_TRANSLATE_Y);
+    lastTranslateY.current = EXPANDED_TRANSLATE_Y;
   }, []);
 
   const animateToPosition = (toValue: number) => {
@@ -219,7 +221,7 @@ export default function RoutesBottomSheet({
             ? (() => {
               const pathPoints = selectedRoute.pathPoints || [];
               const seenCoords = new Set<string>();
-              const stops: { sequence: number; name: string; isParking: boolean }[] = [];
+              const stops: { sequence: number; name: string; isParking: boolean; lat: number; lng: number }[] = [];
 
               pathPoints.forEach((point) => {
                 if (point.routestop_sequence === null || point.routestop_sequence === undefined) {
@@ -248,6 +250,8 @@ export default function RoutesBottomSheet({
                   sequence: seq,
                   name,
                   isParking: isParkingStopName(name),
+                  lat: point.lat,
+                  lng: point.lng,
                 });
               });
 
@@ -297,7 +301,12 @@ export default function RoutesBottomSheet({
                   const isFirst = idx === 0;
                   const isLast = idx === stopPoints.length - 1;
                   return (
-                    <View key={`${stop.sequence}-${idx}`} style={styles.stopItem}>
+                    <TouchableOpacity
+                      key={`${stop.sequence}-${idx}`}
+                      style={styles.stopItem}
+                      onPress={() => onSelectStop?.({ lat: stop.lat, lng: stop.lng, name: stop.name })}
+                      activeOpacity={0.7}
+                    >
                       <View style={styles.stopNumberCircle}>
                         <Text style={styles.stopNumberText}>{stop.sequence}</Text>
                       </View>
@@ -311,7 +320,7 @@ export default function RoutesBottomSheet({
                           <Text style={styles.stopTag}>ป้ายปลายทาง</Text>
                         ) : null}
                       </View>
-                    </View>
+                    </TouchableOpacity>
                   );
                 })}
               </View>
