@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { StyleSheet, View, Text, Image } from 'react-native';
 import { WebView } from 'react-native-webview';
 import RoutesBottomSheet from './component/RoutesBottomSheet';
@@ -35,7 +35,7 @@ export default function HomeScreen() {
     const [liveCars, setLiveCars] = useState<LiveCarLocation[]>([]);
     const [carRouteMap, setCarRouteMap] = useState<Record<string, string>>({});
     const initialCarSelectedRef = useRef(false);
-    const webViewRef = useRef<WebView>(null);
+    const webViewRef = useRef<React.ElementRef<typeof WebView>>(null);
 
     const fetchRoute = async () => {
         try {
@@ -53,6 +53,7 @@ export default function HomeScreen() {
             }
 
             setRoutes(json.routes);
+            setError(null);
 
             const defaultRoute = json.routes.find(
                 (route: Route) => (route.name || '').trim() === 'สายหน้ามอ'
@@ -83,6 +84,7 @@ export default function HomeScreen() {
             }
 
             setLiveCars(json.locations);
+            setError(null);
         } catch (err) {
             console.error(err);
             setError('ไม่สามารถโหลดตำแหน่งรถได้');
