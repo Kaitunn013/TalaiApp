@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { StyleSheet, View, Text, Image } from 'react-native';
+import { StyleSheet, View, Text, Image, Animated } from 'react-native';
 import { WebView } from 'react-native-webview';
 import RoutesBottomSheet from './component/RoutesBottomSheet';
+import SplashScreen from './component/SplashScreen';
 
 const busStopIconUri = Image.resolveAssetSource(require('../assets/BUS_STOP_ICON.png')).uri;
 
@@ -28,6 +29,9 @@ type LiveCarLocation = {
 };
 
 export default function HomeScreen() {
+    const [showSplash, setShowSplash] = useState(true);
+    const splashOpacity = useRef(new Animated.Value(1)).current;
+    const contentOpacity = useRef(new Animated.Value(0)).current;
     const [routes, setRoutes] = useState<Route[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [selectedRoute, setSelectedRoute] = useState<Route | null>(null);
@@ -36,6 +40,27 @@ export default function HomeScreen() {
     const [carRouteMap, setCarRouteMap] = useState<Record<string, string>>({});
     const initialCarSelectedRef = useRef(false);
     const webViewRef = useRef<React.ElementRef<typeof WebView>>(null);
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            Animated.parallel([
+                Animated.timing(splashOpacity, {
+                    toValue: 0,
+                    duration: 500,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(contentOpacity, {
+                    toValue: 1,
+                    duration: 500,
+                    useNativeDriver: true,
+                }),
+            ]).start(() => {
+                setShowSplash(false);
+            });
+        }, 2500);
+
+        return () => clearTimeout(timer);
+    }, [splashOpacity, contentOpacity]);
 
     const fetchRoute = async () => {
         try {
@@ -63,8 +88,8 @@ export default function HomeScreen() {
                 setSelectedRoute(defaultRoute);
             }
         } catch (err) {
-            console.error(err);
-            setError('โหลดข้อมูลไม่สำเร็จ');
+            console.error('fetchRoute failed:', err);
+            setError('ไม่สามารถเชื่อมต่ออินเทอร์เน็ตหรือเซิร์ฟเวอร์ได้');
         }
     };
 
@@ -86,8 +111,8 @@ export default function HomeScreen() {
             setLiveCars(json.locations);
             setError(null);
         } catch (err) {
-            console.error(err);
-            setError('ไม่สามารถโหลดตำแหน่งรถได้');
+            console.error('fetchLiveCars failed:', err);
+            setError('ไม่สามารถเชื่อมต่ออินเทอร์เน็ตหรือเซิร์ฟเวอร์ได้');
         }
     };
 
@@ -103,7 +128,7 @@ export default function HomeScreen() {
                 setCarRouteMap(mapping);
             }
         } catch (err) {
-            console.error('Failed to fetch cars mapping', err);
+            console.error('Failed to fetch cars mapping:', err);
         }
     };
 
@@ -330,31 +355,39 @@ export default function HomeScreen() {
 
     return (
         <View style={{ flex: 1 }}>
-            <WebView
-                ref={webViewRef}
-                originWhitelist={['*']}
-                source={{ html: leafletHtml as any }}
-                style={StyleSheet.absoluteFill}
-            />
-
-            {error && (
-                <View style={styles.errorBox}>
-                    <View style={styles.errorIconDot} />
-                    <Text style={styles.errorText}>{error}</Text>
-                </View>
-            )}
-
-            {routes.length > 0 && (
-                <RoutesBottomSheet
-                    routes={routes}
-                    liveCars={filteredLiveCars}
-                    onSelectRoute={handleSelectRoute}
-                    selectedRouteId={selectedRoute?.id || null}
-                    selectedCarId={selectedCarId}
-                    onSelectCar={setSelectedCarId}
-                    onSelectStop={handleSelectStop}
-                    onOpen={fetchRoute}
+            <Animated.View style={[StyleSheet.absoluteFill, { opacity: contentOpacity }]}>
+                <WebView
+                    ref={webViewRef}
+                    originWhitelist={['*']}
+                    source={{ html: leafletHtml as any }}
+                    style={StyleSheet.absoluteFill}
                 />
+
+                {error && (
+                    <View style={styles.errorBox}>
+                        <View style={styles.errorIconDot} />
+                        <Text style={styles.errorText}>{error}</Text>
+                    </View>
+                )}
+
+                {routes.length > 0 && (
+                    <RoutesBottomSheet
+                        routes={routes}
+                        liveCars={filteredLiveCars}
+                        onSelectRoute={handleSelectRoute}
+                        selectedRouteId={selectedRoute?.id || null}
+                        selectedCarId={selectedCarId}
+                        onSelectCar={setSelectedCarId}
+                        onSelectStop={handleSelectStop}
+                        onOpen={fetchRoute}
+                    />
+                )}
+            </Animated.View>
+
+            {showSplash && (
+                <Animated.View style={[StyleSheet.absoluteFill, { opacity: splashOpacity }]} pointerEvents={showSplash ? 'auto' : 'none'}>
+                    <SplashScreen onFinish={() => setShowSplash(false)} />
+                </Animated.View>
             )}
         </View>
     );
