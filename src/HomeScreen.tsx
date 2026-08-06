@@ -57,7 +57,7 @@ export default function HomeScreen() {
             ]).start(() => {
                 setShowSplash(false);
             });
-        }, 2500);
+        }, 2000);
 
         return () => clearTimeout(timer);
     }, [splashOpacity, contentOpacity]);
