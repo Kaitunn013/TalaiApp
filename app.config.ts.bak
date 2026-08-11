@@ -51,13 +51,11 @@ export default {
         },
       },
     },
+    plugins: [
+      'expo-router',
+    ],
     web: {
       favicon: "./assets/favicon.png",
-    },
-    extra: {
-      eas: {
-        projectId: "86504763-1c4d-4a08-952d-72894a42fda5",
-      },
     },
   },
 };

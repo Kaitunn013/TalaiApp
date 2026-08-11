@@ -1,10 +1,63 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { StyleSheet, View, Text, Image, Animated } from 'react-native';
+import { Asset } from 'expo-asset';
+import * as FileSystem from 'expo-file-system/legacy';
 import { WebView } from 'react-native-webview';
 import RoutesBottomSheet from './component/RoutesBottomSheet';
 import SplashScreen from './component/SplashScreen';
 
-const busStopIconUri = Image.resolveAssetSource(require('../assets/BUS_STOP_ICON.png')).uri;
+const busStopIconModule = require('../assets/BUS_STOP_ICON.png');
+const busIconModule = require('../assets/BUS_ICON.png');
+const busStopIconUri = Image.resolveAssetSource(busStopIconModule).uri;
+const busIconUri = Image.resolveAssetSource(busIconModule).uri;
+
+type MarkerIconUris = {
+    busStop: string;
+    bus: string;
+};
+
+/**
+ * WebView does not consistently resolve React Native's local asset URI in a
+ * release APK. Convert the bundled images to data URIs so Leaflet can load
+ * them regardless of whether the app is running in Expo or as a standalone
+ * Android build.
+ */
+const loadImageAsDataUri = async (assetModule: number, fallbackUri: string): Promise<string> => {
+    try {
+        const asset = Asset.fromModule(assetModule);
+        await asset.downloadAsync();
+
+        if (asset.localUri) {
+            const base64 = await FileSystem.readAsStringAsync(asset.localUri, {
+                encoding: FileSystem.EncodingType.Base64,
+            });
+            return `data:image/png;base64,${base64}`;
+        }
+    } catch (err) {
+        console.warn('Failed to read bundled marker asset:', err);
+    }
+
+    // Keep a fallback for development/web where the bundler serves a URL.
+    const response = await fetch(fallbackUri);
+    if (!response.ok) {
+        throw new Error(`Unable to load marker asset (${response.status})`);
+    }
+
+    const blob = await response.blob();
+    return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const result = reader.result;
+            if (typeof result === 'string' && result.startsWith('data:')) {
+                resolve(result);
+            } else {
+                reject(new Error('Marker asset was not converted to a data URI'));
+            }
+        };
+        reader.onerror = () => reject(reader.error ?? new Error('Failed to read marker asset'));
+        reader.readAsDataURL(blob);
+    });
+};
 
 type RoutePoint = {
     lat: number;
@@ -38,8 +91,35 @@ export default function HomeScreen() {
     const [selectedCarId, setSelectedCarId] = useState<string | null>(null);
     const [liveCars, setLiveCars] = useState<LiveCarLocation[]>([]);
     const [carRouteMap, setCarRouteMap] = useState<Record<string, string>>({});
+    const [markerIconUris, setMarkerIconUris] = useState<MarkerIconUris>({
+        busStop: busStopIconUri,
+        bus: busIconUri,
+    });
     const initialCarSelectedRef = useRef(false);
     const webViewRef = useRef<React.ElementRef<typeof WebView>>(null);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        Promise.all([
+            loadImageAsDataUri(busStopIconModule, busStopIconUri),
+            loadImageAsDataUri(busIconModule, busIconUri),
+        ])
+            .then(([busStop, bus]) => {
+                if (!cancelled) {
+                    setMarkerIconUris({ busStop, bus });
+                }
+            })
+            .catch((err) => {
+                // Keep the original URI as a fallback. This is useful in
+                // development builds where the bundler serves the asset URL.
+                console.warn('Failed to inline map marker assets:', err);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -165,7 +245,7 @@ export default function HomeScreen() {
                     }
                     seenCoords.add(coordKey);
 
-                    const html = `<div class="bus-stop-pin"><img src="${busStopIconUri}" class="bus-stop-img" /><div class="bus-stop-pole"></div></div>`;
+                    const html = `<div class="bus-stop-pin"><img src="${markerIconUris.busStop}" class="bus-stop-img" /><div class="bus-stop-pole"></div></div>`;
                     const stopName = point.name || 'ไม่มีชื่อจุดจอด';
 
                     return `L.marker([${point.lat}, ${point.lng}], {
@@ -214,22 +294,16 @@ export default function HomeScreen() {
         : selectedRoute?.pathPoints ?? [];
     const mapRoutePointsString = mapRoutePoints.map((point) => `[${point.lat}, ${point.lng}]`).join(', ');
 
-    // A simple side-view bus glyph, similar in spirit to a standard round bus/transit icon.
-    const busGlyphSvg =
-        '<svg viewBox="0 0 24 24" width="16" height="16" fill="white" xmlns="http://www.w3.org/2000/svg">' +
-        '<path d="M4 16.5V6.5C4 5.12 5.12 4 6.5 4h11C18.88 4 20 5.12 20 6.5v10c0 .83-.4 1.56-1 2.02V20a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-1H8v1a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-1.48A2.5 2.5 0 1 1 4 16.5ZM6.5 6a.5.5 0 0 0-.5.5V11h12V6.5a.5.5 0 0 0-.5-.5h-11ZM6 13v2a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-2H6Zm1.5 3.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm9 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z"/>' +
-        '</svg>';
-
     const liveCarMarkers = (selectedCar ? [selectedCar] : filteredLiveCars)
         .map((car) => {
-            const html = `<div class="live-car-circle">${busGlyphSvg}</div>`;
+            const html = `<div class="live-car-circle"><img src="${markerIconUris.bus}" class="live-car-img" /></div>`;
 
             return `L.marker([${car.lat}, ${car.lng}], {
           icon: L.divIcon({
             className: '',
             html: ${JSON.stringify(html)},
-            iconSize: [24, 24],
-            iconAnchor: [12, 12],
+            iconSize: [30, 30],
+            iconAnchor: [16, 16],
           }),
           zIndexOffset: 1000
         }).addTo(map);`;
@@ -292,17 +366,24 @@ export default function HomeScreen() {
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
       }
 
-      /* Live car marker: a plain round bus glyph, no animation or badge. */
+      /* Live car marker: circular bus icon without square white background */
       .live-car-circle {
-        width: 24px;
-        height: 24px;
+        width: 23px;
+        height: 23px;
         border-radius: 50%;
-        background: #2563eb;
-        border: 2px solid white;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+        overflow: hidden;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
         display: flex;
         align-items: center;
         justify-content: center;
+        background: transparent;
+      }
+      .live-car-img {
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        display: block;
+        object-fit: cover;
       }
     </style>
   </head>
@@ -313,7 +394,7 @@ export default function HomeScreen() {
       // Map is created without an initial view; the view is set below (either
       // fit to the whole selected route, or a default fallback), then layers
       // are added on top.
-      const map = L.map('map');
+      const map = L.map('map', { zoomControl: false });
 
       ${mapRoutePoints.length > 0
             ? `
@@ -359,6 +440,9 @@ export default function HomeScreen() {
                 <WebView
                     ref={webViewRef}
                     originWhitelist={['*']}
+                    allowFileAccess
+                    allowingReadAccessToURL="file:///"
+                    allowUniversalAccessFromFileURLs
                     source={{ html: leafletHtml as any }}
                     style={StyleSheet.absoluteFill}
                 />

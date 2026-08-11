@@ -4,18 +4,19 @@
     "slug": "TalaiApp",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/APP_ICON.png",
     "scheme": "talaiapp",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon"
     },
     "android": {
+      "package": "com.sumolnwza.talaiapp",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "foregroundImage": "./assets/APP_ICON.png",
+        "backgroundImage": "./assets/APP_ICON.png",
+        "monochromeImage": "./assets/APP_ICON.png"
       },
       "predictiveBackGestureEnabled": false
     },
@@ -29,7 +30,7 @@
         "expo-splash-screen",
         {
           "backgroundColor": "#208AEF",
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/APP_ICON.png",
           "imageWidth": 76
         }
       ]
@@ -37,6 +38,19 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "2c11a6c7-abb8-4677-b8f2-0594a48d6112"
+      }
+    },
+    "owner": "sumolnwza",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/2c11a6c7-abb8-4677-b8f2-0594a48d6112"
     }
   }
 }
