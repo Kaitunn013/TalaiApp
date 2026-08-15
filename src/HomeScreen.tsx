@@ -5,6 +5,14 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { WebView } from 'react-native-webview';
 import RoutesBottomSheet from './component/RoutesBottomSheet';
 import SplashScreen from './component/SplashScreen';
+import { useCarLocation } from './hooks/useCarLocation';
+import {
+    getCars,
+    getRoutePoints,
+    getRoutes,
+    type LiveCarLocation,
+    type Route,
+} from './services/talaiApi';
 
 const busStopIconModule = require('../assets/BUS_STOP_ICON.png');
 const busIconModule = require('../assets/BUS_ICON.png');
@@ -59,28 +67,6 @@ const loadImageAsDataUri = async (assetModule: number, fallbackUri: string): Pro
     });
 };
 
-type RoutePoint = {
-    lat: number;
-    lng: number;
-    routestop_sequence?: number | null;
-    name?: string | null;
-};
-
-type Route = {
-    id: string;
-    name: string;
-    pathPoints: RoutePoint[];
-};
-
-type LiveCarLocation = {
-    carId: string;
-    lat: number;
-    lng: number;
-    status: string;
-    eta: unknown;
-    routeId?: string | null;
-};
-
 export default function HomeScreen() {
     const [showSplash, setShowSplash] = useState(true);
     const splashOpacity = useRef(new Animated.Value(1)).current;
@@ -89,14 +75,18 @@ export default function HomeScreen() {
     const [error, setError] = useState<string | null>(null);
     const [selectedRoute, setSelectedRoute] = useState<Route | null>(null);
     const [selectedCarId, setSelectedCarId] = useState<string | null>(null);
-    const [liveCars, setLiveCars] = useState<LiveCarLocation[]>([]);
     const [carRouteMap, setCarRouteMap] = useState<Record<string, string>>({});
+    const { currentLocation: liveCars, error: locationError } = useCarLocation();
     const [markerIconUris, setMarkerIconUris] = useState<MarkerIconUris>({
         busStop: busStopIconUri,
         bus: busIconUri,
     });
     const initialCarSelectedRef = useRef(false);
     const webViewRef = useRef<React.ElementRef<typeof WebView>>(null);
+
+    useEffect(() => {
+        if (locationError) setError(locationError);
+    }, [locationError]);
 
     useEffect(() => {
         let cancelled = false;
@@ -142,6 +132,7 @@ export default function HomeScreen() {
         return () => clearTimeout(timer);
     }, [splashOpacity, contentOpacity]);
 
+    /* Legacy polling implementation retained for reference only.
     const fetchRoute = async () => {
         try {
             const res = await fetch('https://kukps-talai.vercel.app/api/client/routes');
@@ -212,16 +203,63 @@ export default function HomeScreen() {
         }
     };
 
+    */
+    const fetchRouteFromApi = async () => {
+        try {
+            const routeList = await getRoutes();
+            const routesWithPoints = await Promise.all(
+                routeList.map(async (route) => {
+                    if (route.pathPoints.length > 0) return route;
+
+                    try {
+                        return {
+                            ...route,
+                            pathPoints: await getRoutePoints(route.id),
+                        };
+                    } catch (pointsError) {
+                        console.warn(`Failed to load points for route ${route.id}:`, pointsError);
+                        return route;
+                    }
+                })
+            );
+
+            if (routesWithPoints.length === 0) {
+                setError('ไม่พบข้อมูลเส้นทางจาก API');
+                return;
+            }
+
+            setRoutes(routesWithPoints);
+            setError(null);
+            setSelectedRoute(
+                routesWithPoints.find((route) => route.name.includes('หน้ามอ')) ??
+                routesWithPoints[0]
+            );
+        } catch (routeError) {
+            console.error('fetchRouteFromApi failed:', routeError);
+            setError(
+                routeError instanceof Error
+                    ? routeError.message
+                    : 'ไม่สามารถโหลดข้อมูลเส้นทางได้'
+            );
+        }
+    };
+
+    const fetchCarsMappingFromApi = async () => {
+        try {
+            const cars = await getCars();
+            const mapping: Record<string, string> = {};
+            cars.forEach((car) => {
+                if (car.routeId) mapping[car.carId] = car.routeId;
+            });
+            setCarRouteMap(mapping);
+        } catch (carsError) {
+            console.error('fetchCarsMappingFromApi failed:', carsError);
+        }
+    };
+
     useEffect(() => {
-        fetchRoute();
-        fetchCarsMapping();
-        fetchLiveCars();
-
-        const interval = setInterval(() => {
-            fetchLiveCars();
-        }, 10000);
-
-        return () => clearInterval(interval);
+        fetchRouteFromApi();
+        fetchCarsMappingFromApi();
     }, []);
 
     const initialLat = 14.0227;
@@ -463,7 +501,7 @@ export default function HomeScreen() {
                         selectedCarId={selectedCarId}
                         onSelectCar={setSelectedCarId}
                         onSelectStop={handleSelectStop}
-                        onOpen={fetchRoute}
+                        onOpen={fetchRouteFromApi}
                     />
                 )}
             </Animated.View>

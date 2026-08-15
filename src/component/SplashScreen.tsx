@@ -5,14 +5,14 @@ interface SplashScreenProps {
     onFinish?: () => void;
 }
 
-const LOGO_URI = 'https://lh3.googleusercontent.com/aida-public/AB6AXuABY7B_N4oBZcuM5qdFaBEK8kO6iE8IuvNUKUNwg6dObKJiJOdaHHKmXKOZG22ZYkK5YDggzwQrb9_5PwVb_fle00AEQy1xgpzKjkitAK7zKx_wNyYmXgBiNCe1Fhr40NyVLdms8eSZWJt3sHEkOlgegnt0RnEFkOLH0EXMEPdo7vqIlqKM8pyHnnejx4tb1vKVzBixSb7U2aQZ5U7Xx2oO_DGnI_t88A9gQjdIWPfDkusZhuechswEAgE4tJeHbWPuSQ';
+const LOGO_SOURCE = require('../../assets/APP_ICON.png');
 
 export default function SplashScreen({ onFinish }: SplashScreenProps) {
     return (
         <View style={styles.container}>
             <View style={styles.logoWrapper}>
                 <Image
-                    source={{ uri: LOGO_URI }}
+                    source={LOGO_SOURCE}
                     style={styles.logo}
                     resizeMode="contain"
                 />
