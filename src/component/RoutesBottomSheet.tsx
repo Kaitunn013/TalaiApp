@@ -221,10 +221,20 @@ export default function RoutesBottomSheet({
             ? (() => {
               const pathPoints = selectedRoute.pathPoints || [];
               const seenCoords = new Set<string>();
-              const stops: { sequence: number; name: string; isParking: boolean; lat: number; lng: number }[] = [];
+              const stops: {
+                sequence: number;
+                sortSequence: number;
+                name: string;
+                isParking: boolean;
+                lat: number;
+                lng: number;
+              }[] = [];
 
               pathPoints.forEach((point) => {
-                if (point.routestop_sequence === null || point.routestop_sequence === undefined) {
+                // `sequence` exists on every route point. Only named points
+                // are actual stops, matching the markers shown on the map.
+                const pointName = point.name?.trim();
+                if (!pointName) {
                   return;
                 }
                 const coordKey = `${point.lat.toFixed(6)},${point.lng.toFixed(6)}`;
@@ -233,21 +243,11 @@ export default function RoutesBottomSheet({
                 }
                 seenCoords.add(coordKey);
 
-                const duplicateSequences = pathPoints
-                  .filter(
-                    (p) =>
-                      p.lat.toFixed(6) === point.lat.toFixed(6) &&
-                      p.lng.toFixed(6) === point.lng.toFixed(6) &&
-                      p.routestop_sequence !== null &&
-                      p.routestop_sequence !== undefined
-                  )
-                  .map((p) => p.routestop_sequence as number)
-                  .sort((a, b) => a - b);
-
-                const seq = duplicateSequences.length > 0 ? duplicateSequences[0] : point.routestop_sequence;
+                const sortSequence = point.routestop_sequence ?? Number.MAX_SAFE_INTEGER;
                 const name = point.name || 'ไม่มีชื่อจุดจอด';
                 stops.push({
-                  sequence: seq,
+                  sequence: 0,
+                  sortSequence,
                   name,
                   isParking: isParkingStopName(name),
                   lat: point.lat,
@@ -255,7 +255,9 @@ export default function RoutesBottomSheet({
                 });
               });
 
-              return stops.sort((a, b) => a.sequence - b.sequence);
+              return stops
+                .sort((a, b) => a.sortSequence - b.sortSequence)
+                .map((stop, index) => ({ ...stop, sequence: index + 1 }));
             })()
             : [];
 
@@ -267,7 +269,7 @@ export default function RoutesBottomSheet({
                 <Text style={styles.stopsTitle} numberOfLines={1} ellipsizeMode="tail">
                   จุดจอดรถ · {selectedRoute?.name}
                 </Text>
-                {liveCars.length > 0 && onSelectCar ? (
+                {liveCars.length > 1 && onSelectCar ? (
                   <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
@@ -394,7 +396,7 @@ const styles = StyleSheet.create({
   carButtonsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-start',
     flexGrow: 1,
   },
   cardHorizontal: {

@@ -270,7 +270,8 @@ export default function HomeScreen() {
         ? (() => {
             const pathPoints = selectedRoute.pathPoints;
             const stopPoints = pathPoints.filter(
-                (point) => point.routestop_sequence !== null && point.routestop_sequence !== undefined
+                // API ส่ง sequence มาให้ทุกจุดของเส้นทาง แต่จุดจอดจริงจะมีชื่อป้าย
+                (point) => Boolean(point.name?.trim())
             );
 
             const seenCoords = new Set<string>();
@@ -294,7 +295,7 @@ export default function HomeScreen() {
                 iconAnchor: [13, 38],
                 popupAnchor: [0, -38],
               })
-            }).bindPopup(${JSON.stringify(stopName)}).addTo(map);`;
+            }).bindPopup(${JSON.stringify(stopName)}, { closeButton: false }).addTo(map);`;
                 })
                 .filter((str) => str !== '');
         })()
@@ -466,7 +467,10 @@ export default function HomeScreen() {
     const handleSelectStop = (stop: { lat: number; lng: number; name?: string | null }) => {
         if (webViewRef.current) {
             const jsCode = `
-              map.flyTo([${stop.lat}, ${stop.lng}], 18, { animate: true, duration: 1 });
+              if (typeof map !== 'undefined') {
+                map.flyTo([${stop.lat}, ${stop.lng}], 18, { animate: true, duration: 1 });
+              }
+              true;
             `;
             webViewRef.current.injectJavaScript(jsCode);
         }
