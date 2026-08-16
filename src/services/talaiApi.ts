@@ -131,7 +131,11 @@ const normalizePoint = (value: unknown): RoutePoint | null => {
         point.routeStopSequence ??
         point.route_stop_sequence ??
         point.sequence;
-    const timeToNextSecs = point.timeToNextSecs ?? point.time_to_next_secs;
+    const timeToNextSecs =
+        point.timeToNextSecs ??
+        point.time_to_next_secs ??
+        point.timeToNextSec ??
+        point.time_to_next_sec;
 
     return {
         lat,

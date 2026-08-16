@@ -209,12 +209,26 @@ export default function HomeScreen() {
             const routeList = await getRoutes();
             const routesWithPoints = await Promise.all(
                 routeList.map(async (route) => {
-                    if (route.pathPoints.length > 0) return route;
-
                     try {
+                        // `/route-points/by-route` contains stop names and
+                        // timeToNextSecs, so prefer it over the points
+                        // included in the route summary.
+                        const routePoints = await getRoutePoints(route.id);
+                        console.log(
+                            '[API] route points loaded:',
+                            route.id,
+                            routePoints.length,
+                            routePoints
+                                .filter((point) => Boolean(point.name?.trim()))
+                                .slice(0, 5)
+                                .map((point) => ({
+                                    name: point.name,
+                                    timeToNextSecs: point.timeToNextSecs,
+                                }))
+                        );
                         return {
                             ...route,
-                            pathPoints: await getRoutePoints(route.id),
+                            pathPoints: routePoints.length > 0 ? routePoints : route.pathPoints,
                         };
                     } catch (pointsError) {
                         console.warn(`Failed to load points for route ${route.id}:`, pointsError);

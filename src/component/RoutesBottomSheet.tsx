@@ -24,6 +24,7 @@ type RoutePoint = {
   lng: number;
   routestop_sequence?: number | null;
   name?: string | null;
+  timeToNextSecs?: number | null;
 };
 
 type Route = {
@@ -43,6 +44,12 @@ type LiveCar = {
 const isParkingStopName = (name: string) => {
   const n = name.trim().toLowerCase();
   return n.includes('park') || n.includes('จอด') || n.includes('parking') || n.includes('ศร.2');
+};
+
+const formatTimeToNextStop = (seconds: number | null | undefined) => {
+  if (seconds === null || seconds === undefined || seconds < 0) return null;
+  const minutes = Math.max(1, Math.floor(seconds / 60));
+  return `<${minutes} นาที`;
 };
 
 export default function RoutesBottomSheet({
@@ -226,6 +233,7 @@ export default function RoutesBottomSheet({
                 sortSequence: number;
                 name: string;
                 isParking: boolean;
+                timeToNextSecs: number | null;
                 lat: number;
                 lng: number;
               }[] = [];
@@ -250,6 +258,7 @@ export default function RoutesBottomSheet({
                   sortSequence,
                   name,
                   isParking: isParkingStopName(name),
+                  timeToNextSecs: point.timeToNextSecs ?? null,
                   lat: point.lat,
                   lng: point.lng,
                 });
@@ -302,6 +311,7 @@ export default function RoutesBottomSheet({
                 {stopPoints.map((stop, idx) => {
                   const isFirst = idx === 0;
                   const isLast = idx === stopPoints.length - 1;
+                  const timeToNext = formatTimeToNextStop(stop.timeToNextSecs);
                   return (
                     <TouchableOpacity
                       key={`${stop.sequence}-${idx}`}
@@ -313,7 +323,12 @@ export default function RoutesBottomSheet({
                         <Text style={styles.stopNumberText}>{stop.sequence}</Text>
                       </View>
                       <View style={styles.stopTextGroup}>
-                        <Text style={styles.stopNameText}>{stop.name}</Text>
+                        <View style={styles.stopNameRow}>
+                          <Text style={styles.stopNameText}>{stop.name}</Text>
+                          {timeToNext ? (
+                            <Text style={styles.stopTimeText}>{timeToNext}</Text>
+                          ) : null}
+                        </View>
                         {stop.isParking ? (
                           <Text style={styles.stopTag}>จุดจอดรถ</Text>
                         ) : isFirst ? (
@@ -484,10 +499,23 @@ const styles = StyleSheet.create({
   stopTextGroup: {
     flex: 1,
   },
+  stopNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
   stopNameText: {
+    flex: 1,
     fontSize: 15,
     color: '#333',
     fontWeight: '500',
+  },
+  stopTimeText: {
+    fontSize: 16,
+    color: '#006a4e',
+    marginLeft: 8,
+    fontWeight: '600',
+    textAlign: 'right',
   },
   stopTag: {
     fontSize: 11,
