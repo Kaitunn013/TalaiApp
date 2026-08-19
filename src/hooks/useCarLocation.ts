@@ -19,6 +19,38 @@ type WebSocketConstructor = new (
 
 const WebSocketWithHeaders = WebSocket as unknown as WebSocketConstructor;
 
+const collectWebSocketTimeFields = (
+    value: unknown,
+    path = '',
+    result: Record<string, unknown> = {},
+    depth = 0
+) => {
+    if (depth > 4 || value === null || value === undefined) return result;
+
+    if (Array.isArray(value)) {
+        value.slice(0, 3).forEach((item, index) => {
+            collectWebSocketTimeFields(item, `${path}[${index}]`, result, depth + 1);
+        });
+        return result;
+    }
+
+    if (typeof value !== 'object') return result;
+
+    Object.entries(value as Record<string, unknown>).forEach(([key, item]) => {
+        const fieldPath = path ? `${path}.${key}` : key;
+
+        if (/time|eta|stop|sequence/i.test(key)) {
+            result[fieldPath] = item;
+        }
+
+        if (item !== null && typeof item === 'object') {
+            collectWebSocketTimeFields(item, fieldPath, result, depth + 1);
+        }
+    });
+
+    return result;
+};
+
 const mergeLocations = (
     previous: LiveCarLocation[],
     updates: LiveCarLocation[]
@@ -83,6 +115,7 @@ export function useCarLocation(wsUrl = LIVE_LOCATIONS_WS_URL) {
                     const payload = JSON.parse(String(event.data));
                     const updates = normalizeLiveLocationMessage(payload);
                     console.log('[WS] message received:', updates.length, 'location(s)');
+                    console.log('[WS] payload time/stop fields:', collectWebSocketTimeFields(payload));
                     if (updates.length === 0) return;
 
                     const isSnapshot =

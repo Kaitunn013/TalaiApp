@@ -13,6 +13,10 @@ import {
     type LiveCarLocation,
     type Route,
 } from './services/talaiApi';
+import {
+    calculateLocalNextStop,
+    type LocalStopProgressState,
+} from './utils/localStopProgress';
 
 const busStopIconModule = require('../assets/BUS_STOP_ICON.png');
 const busIconModule = require('../assets/BUS_ICON.png');
@@ -75,6 +79,7 @@ export default function HomeScreen() {
     const [error, setError] = useState<string | null>(null);
     const [selectedRoute, setSelectedRoute] = useState<Route | null>(null);
     const [selectedCarId, setSelectedCarId] = useState<string | null>(null);
+    const [localNextStopSequence, setLocalNextStopSequence] = useState<number | null>(null);
     const [carRouteMap, setCarRouteMap] = useState<Record<string, string>>({});
     const { currentLocation: liveCars, error: locationError } = useCarLocation();
     const [markerIconUris, setMarkerIconUris] = useState<MarkerIconUris>({
@@ -83,6 +88,7 @@ export default function HomeScreen() {
     });
     const initialCarSelectedRef = useRef(false);
     const webViewRef = useRef<React.ElementRef<typeof WebView>>(null);
+    const localProgressByCarRef = useRef<Record<string, LocalStopProgressState>>({});
 
     useEffect(() => {
         if (locationError) setError(locationError);
@@ -341,6 +347,36 @@ export default function HomeScreen() {
     const selectedCar = selectedCarId
         ? liveCars.find((car) => car.carId === selectedCarId) ?? null
         : null;
+
+    useEffect(() => {
+        if (!selectedRoute || !selectedCar) {
+            setLocalNextStopSequence(null);
+            return;
+        }
+
+        const previousState = localProgressByCarRef.current[selectedCar.carId];
+        const result = calculateLocalNextStop(
+            selectedRoute,
+            { lat: selectedCar.lat, lng: selectedCar.lng },
+            previousState
+        );
+
+        if (!result) {
+            setLocalNextStopSequence(null);
+            return;
+        }
+
+        localProgressByCarRef.current[selectedCar.carId] = result.state;
+        setLocalNextStopSequence(result.nextStopSequence);
+
+        console.log('[LOCAL] next stop calculated:', {
+            carId: selectedCar.carId,
+            routeId: selectedRoute.id,
+            localNextStopSequence: result.nextStopSequence,
+            nextStopName: result.nextStopName,
+            distanceToNextStopMeters: Math.round(result.distanceToNextStopMeters),
+        });
+    }, [selectedCar, selectedRoute]);
 
     const mapRoutePoints = selectedRoute?.name?.trim() === 'สายหน้ามอ'
         ? routes.find((route) => (route.name || '').trim() === 'สายหอใน')?.pathPoints ?? selectedRoute?.pathPoints ?? []

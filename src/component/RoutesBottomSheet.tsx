@@ -511,7 +511,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   stopTimeText: {
-    fontSize: 16,
+    fontSize: 18,
     color: '#006a4e',
     marginLeft: 8,
     fontWeight: '600',
