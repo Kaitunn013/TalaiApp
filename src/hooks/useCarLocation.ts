@@ -66,6 +66,7 @@ const mergeLocations = (
 export function useCarLocation(wsUrl = LIVE_LOCATIONS_WS_URL) {
     const [currentLocation, setCurrentLocation] = useState<LiveCarLocation[]>([]);
     const [isConnected, setIsConnected] = useState(false);
+    const [hasReceivedWebSocketUpdate, setHasReceivedWebSocketUpdate] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const socketRef = useRef<WebSocket | null>(null);
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -117,6 +118,8 @@ export function useCarLocation(wsUrl = LIVE_LOCATIONS_WS_URL) {
                     console.log('[WS] message received:', updates.length, 'location(s)');
                     console.log('[WS] payload time/stop fields:', collectWebSocketTimeFields(payload));
                     if (updates.length === 0) return;
+
+                    setHasReceivedWebSocketUpdate(true);
 
                     const isSnapshot =
                         Array.isArray(payload) ||
@@ -184,5 +187,5 @@ export function useCarLocation(wsUrl = LIVE_LOCATIONS_WS_URL) {
         };
     }, [wsUrl]);
 
-    return { currentLocation, isConnected, error };
+    return { currentLocation, isConnected, error, hasReceivedWebSocketUpdate };
 }

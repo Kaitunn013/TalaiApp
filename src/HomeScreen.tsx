@@ -81,7 +81,11 @@ export default function HomeScreen() {
     const [selectedCarId, setSelectedCarId] = useState<string | null>(null);
     const [localNextStopSequence, setLocalNextStopSequence] = useState<number | null>(null);
     const [carRouteMap, setCarRouteMap] = useState<Record<string, string>>({});
-    const { currentLocation: liveCars, error: locationError } = useCarLocation();
+    const {
+        currentLocation: liveCars,
+        error: locationError,
+        hasReceivedWebSocketUpdate,
+    } = useCarLocation();
     const [markerIconUris, setMarkerIconUris] = useState<MarkerIconUris>({
         busStop: busStopIconUri,
         bus: busIconUri,
@@ -349,6 +353,13 @@ export default function HomeScreen() {
         : null;
 
     useEffect(() => {
+        if (!hasReceivedWebSocketUpdate) {
+            // ไม่ใช้ตำแหน่งเก่าจาก API เป็นจุดเริ่มต้นของการคำนวณรอบทดสอบ
+            localProgressByCarRef.current = {};
+            setLocalNextStopSequence(null);
+            return;
+        }
+
         if (!selectedRoute || !selectedCar) {
             setLocalNextStopSequence(null);
             return;
@@ -376,7 +387,7 @@ export default function HomeScreen() {
             nextStopName: result.nextStopName,
             distanceToNextStopMeters: Math.round(result.distanceToNextStopMeters),
         });
-    }, [selectedCar, selectedRoute]);
+    }, [hasReceivedWebSocketUpdate, selectedCar, selectedRoute]);
 
     const mapRoutePoints = selectedRoute?.name?.trim() === 'สายหน้ามอ'
         ? routes.find((route) => (route.name || '').trim() === 'สายหอใน')?.pathPoints ?? selectedRoute?.pathPoints ?? []
