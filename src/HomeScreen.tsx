@@ -28,12 +28,7 @@ type MarkerIconUris = {
     bus: string;
 };
 
-/**
- * WebView does not consistently resolve React Native's local asset URI in a
- * release APK. Convert the bundled images to data URIs so Leaflet can load
- * them regardless of whether the app is running in Expo or as a standalone
- * Android build.
- */
+
 const loadImageAsDataUri = async (assetModule: number, fallbackUri: string): Promise<string> => {
     try {
         const asset = Asset.fromModule(assetModule);
@@ -49,7 +44,7 @@ const loadImageAsDataUri = async (assetModule: number, fallbackUri: string): Pro
         console.warn('Failed to read bundled marker asset:', err);
     }
 
-    // Keep a fallback for development/web where the bundler serves a URL.
+
     const response = await fetch(fallbackUri);
     if (!response.ok) {
         throw new Error(`Unable to load marker asset (${response.status})`);
@@ -111,8 +106,6 @@ export default function HomeScreen() {
                 }
             })
             .catch((err) => {
-                // Keep the original URI as a fallback. This is useful in
-                // development builds where the bundler serves the asset URL.
                 console.warn('Failed to inline map marker assets:', err);
             });
 

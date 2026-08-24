@@ -1,11 +1,19 @@
 import type { Route } from '../services/talaiApi';
 
 // ระยะห่างที่ใช้ตัดสินว่ารถมาถึงป้ายแล้ว หน่วยเป็นเมตร
-const STOP_ARRIVAL_RADIUS_METERS = 35;
+const STOP_ARRIVAL_RADIUS_METERS = 20;
 
 // จำนวน path point ที่ยอมให้ตำแหน่งรถดูเหมือนย้อนกลับได้
 // ใช้ป้องกัน GPS แกว่งเล็กน้อย แต่ไม่ให้ลำดับป้ายย้อนกลับจริง
 const PATH_BACKTRACK_TOLERANCE = 4;
+
+// จำนวน path point ที่อนุญาตให้รถเดินหน้าได้ในหนึ่ง WebSocket update
+// ช่วยป้องกันการเลือกถนนช่วงอื่นที่อยู่ใกล้กัน แต่ไม่อยู่ถัดจากตำแหน่งเดิม
+const PATH_FORWARD_LOOKAHEAD = 12;
+
+// จุดเริ่มต้นและจุดปลายทางอาจใช้พิกัดเดียวกัน
+// ถ้ารถเพิ่งเริ่มส่งตำแหน่ง ให้ถือว่าอยู่ช่วงต้นเส้นทางก่อน
+const START_END_AMBIGUITY_RADIUS_METERS = 80;
 
 // ข้อมูลสถานะที่ต้องจำไว้ระหว่างการคำนวณแต่ละครั้ง
 // เพื่อให้การคำนวณครั้งใหม่รู้ว่ารถอยู่ตรงไหนของเส้นทางก่อนหน้า
@@ -146,23 +154,61 @@ const findNearestPathIndex = (
         }
     });
 
+    const lastPathIndex = route.pathPoints.length - 1;
+    const isNearStartPoint =
+        distanceInMeters(carLocation, route.pathPoints[0]) <= START_END_AMBIGUITY_RADIUS_METERS;
+
     // ถ้าเป็นการคำนวณครั้งแรก ให้ใช้จุดที่ใกล้ที่สุดทันที
     if (!previousState || previousState.routeId !== route.id) {
+        // ต้นทางและปลายทางเป็นพิกัดเดียวกัน จึงอาจเลือก path ช่วงท้ายผิดได้
+        // ในการเริ่มต้นรอบใหม่ ให้เลือก path ช่วงต้นก่อน
+        if (nearestIndex >= lastPathIndex * 0.75 && isNearStartPoint) {
+            return 0;
+        }
+
         return nearestIndex;
     }
 
     // ตรวจกรณีรถวิ่งครบหนึ่งรอบ จากช่วงท้ายกลับไปช่วงต้นเส้นทาง
-    const lastPathIndex = route.pathPoints.length - 1;
     const isCompletingLoop =
         previousState.pathIndex >= lastPathIndex * 0.75 && nearestIndex <= lastPathIndex * 0.25;
 
-    // GPS อาจแกว่งย้อนกลับเล็กน้อย จึงไม่ให้ลำดับย้อนกลับ
-    // แต่ยังอนุญาตให้เปลี่ยนจากจุดท้ายกลับไปจุดแรกเมื่อครบหนึ่งรอบ
-    if (!isCompletingLoop && nearestIndex < previousState.pathIndex - PATH_BACKTRACK_TOLERANCE) {
-        return previousState.pathIndex;
+    // จำกัดพื้นที่ค้นหาให้อยู่ใกล้ตำแหน่งเดิมและไปข้างหน้า
+    // เพื่อไม่ให้ถนนขนานหรือเส้นทางที่ทับกันทำให้ index กระโดดไปช่วงอื่น
+    const candidateIndexes = new Set<number>();
+    const firstCandidateIndex = Math.max(
+        0,
+        previousState.pathIndex - PATH_BACKTRACK_TOLERANCE
+    );
+    const lastCandidateIndex = Math.min(
+        lastPathIndex,
+        previousState.pathIndex + PATH_FORWARD_LOOKAHEAD
+    );
+
+    for (let index = firstCandidateIndex; index <= lastCandidateIndex; index += 1) {
+        candidateIndexes.add(index);
     }
 
-    return nearestIndex;
+    // เมื่อครบหนึ่งรอบ ให้เพิ่ม path ช่วงต้นเข้ามาในพื้นที่ค้นหา
+    if (isCompletingLoop) {
+        const loopCandidateEnd = Math.min(lastPathIndex, PATH_FORWARD_LOOKAHEAD);
+        for (let index = 0; index <= loopCandidateEnd; index += 1) {
+            candidateIndexes.add(index);
+        }
+    }
+
+    let constrainedNearestIndex = previousState.pathIndex;
+    let constrainedNearestDistance = Number.POSITIVE_INFINITY;
+
+    candidateIndexes.forEach((index) => {
+        const distance = distanceInMeters(carLocation, route.pathPoints[index]);
+        if (distance < constrainedNearestDistance) {
+            constrainedNearestDistance = distance;
+            constrainedNearestIndex = index;
+        }
+    });
+
+    return constrainedNearestIndex;
 };
 
 // ฟังก์ชันหลัก: คำนวณว่าป้ายถัดไปของรถคือป้ายใด
@@ -198,18 +244,35 @@ export const calculateLocalNextStop = (
             : candidateIndex;
     const nextStop = stops[nextStopIndex];
 
+    // ป้องกันลำดับป้ายย้อนกลับจาก GPS แกว่งหรือการเลือก path ที่อยู่ใกล้กัน
+    // ยอมรับเฉพาะลำดับที่เท่าเดิมหรือมากกว่าเดิม
+    // ยกเว้นกรณีป้ายสุดท้ายวนกลับไปป้ายแรก เช่น 10 -> 1
+    const previousStop = previousState
+        ? stops.find((stop) => stop.sequence === previousState.nextStopSequence)
+        : undefined;
+    const isCompletingStopLoop =
+        previousStop?.sequence === stops.length && nextStop.sequence === 1;
+    const shouldKeepPreviousStop =
+        previousStop !== undefined &&
+        nextStop.sequence < previousStop.sequence &&
+        !isCompletingStopLoop;
+    const resolvedNextStop = shouldKeepPreviousStop ? previousStop : nextStop;
+
     // บันทึกสถานะไว้ใช้ในการคำนวณ WebSocket ครั้งถัดไป
     const state: LocalStopProgressState = {
         routeId: route.id,
-        pathIndex: nearestPathIndex,
-        nextStopSequence: nextStop.sequence,
+        // ถ้าป้ายใหม่ย้อนกลับ ให้คง pathIndex เดิมไว้ด้วย
+        pathIndex: shouldKeepPreviousStop && previousState
+            ? previousState.pathIndex
+            : nearestPathIndex,
+        nextStopSequence: resolvedNextStop.sequence,
     };
 
     // ส่งข้อมูลป้ายถัดไป ระยะทาง และสถานะล่าสุดกลับให้ HomeScreen
     return {
-        nextStopSequence: nextStop.sequence,
-        nextStopName: nextStop.name,
-        distanceToNextStopMeters: distanceInMeters(carLocation, nextStop),
+        nextStopSequence: resolvedNextStop.sequence,
+        nextStopName: resolvedNextStop.name,
+        distanceToNextStopMeters: distanceInMeters(carLocation, resolvedNextStop),
         state,
     };
 };
