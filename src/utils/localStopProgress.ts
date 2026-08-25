@@ -1,7 +1,7 @@
 import type { Route } from '../services/talaiApi';
 
 // ระยะห่างที่ใช้ตัดสินว่ารถมาถึงป้ายแล้ว หน่วยเป็นเมตร
-const STOP_ARRIVAL_RADIUS_METERS = 20;
+const STOP_ARRIVAL_RADIUS_METERS = 5;
 
 // จำนวน path point ที่ยอมให้ตำแหน่งรถดูเหมือนย้อนกลับได้
 // ใช้ป้องกัน GPS แกว่งเล็กน้อย แต่ไม่ให้ลำดับป้ายย้อนกลับจริง
