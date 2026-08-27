@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { StyleSheet, View, Text, Image, Animated } from 'react-native';
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -85,6 +85,7 @@ export default function HomeScreen() {
         busStop: busStopIconUri,
         bus: busIconUri,
     });
+    const [isMapReady, setIsMapReady] = useState(false);
     const initialCarSelectedRef = useRef(false);
     const webViewRef = useRef<React.ElementRef<typeof WebView>>(null);
     const localProgressByCarRef = useRef<Record<string, LocalStopProgressState>>({});
@@ -345,6 +346,18 @@ export default function HomeScreen() {
         ? liveCars.find((car) => car.carId === selectedCarId) ?? null
         : null;
 
+    // ส่งเฉพาะข้อมูลตำแหน่งรถเข้า WebView โดยไม่สร้างแผนที่ใหม่
+    const carsForMap = selectedCar ? [selectedCar] : filteredLiveCars;
+
+    useEffect(() => {
+        if (!isMapReady || !webViewRef.current) return;
+
+        webViewRef.current.postMessage(JSON.stringify({
+            type: 'UPDATE_LIVE_CARS',
+            cars: carsForMap,
+        }));
+    }, [carsForMap, isMapReady]);
+
     useEffect(() => {
         if (!hasReceivedWebSocketUpdate) {
             // ไม่ใช้ตำแหน่งเก่าจาก API เป็นจุดเริ่มต้นของการคำนวณรอบทดสอบ
@@ -386,22 +399,6 @@ export default function HomeScreen() {
         ? routes.find((route) => (route.name || '').trim() === 'สายหอใน')?.pathPoints ?? selectedRoute?.pathPoints ?? []
         : selectedRoute?.pathPoints ?? [];
     const mapRoutePointsString = mapRoutePoints.map((point) => `[${point.lat}, ${point.lng}]`).join(', ');
-
-    const liveCarMarkers = (selectedCar ? [selectedCar] : filteredLiveCars)
-        .map((car) => {
-            const html = `<div class="live-car-circle"><img src="${markerIconUris.bus}" class="live-car-img" /></div>`;
-
-            return `L.marker([${car.lat}, ${car.lng}], {
-          icon: L.divIcon({
-            className: '',
-            html: ${JSON.stringify(html)},
-            iconSize: [30, 30],
-            iconAnchor: [16, 16],
-          }),
-          zIndexOffset: 1000
-        }).addTo(map);`;
-        })
-        .join('\n');
 
     const leafletHtml = `
   <!DOCTYPE html>
@@ -508,11 +505,62 @@ export default function HomeScreen() {
       // Draw selected route
       ${selectedRoutePolyline}
       ${routePolylines.join('\n')}
-      ${liveCarMarkers}
+
+      // Keep live car markers inside the WebView and update only their coordinates.
+      const liveCarMarkers = new Map();
+      const _busIconUri = ${JSON.stringify(markerIconUris.bus)};
+
+      const updateLiveCarMarkers = (cars) => {
+        const activeCarIds = new Set(cars.map((car) => car.carId));
+
+        liveCarMarkers.forEach((marker, carId) => {
+          if (!activeCarIds.has(carId)) {
+            map.removeLayer(marker);
+            liveCarMarkers.delete(carId);
+          }
+        });
+
+        cars.forEach((car) => {
+          const existingMarker = liveCarMarkers.get(car.carId);
+
+          if (existingMarker) {
+            existingMarker.setLatLng([car.lat, car.lng]);
+            return;
+          }
+
+          const html = '<div class="live-car-circle"><img src="' + _busIconUri + '" class="live-car-img" /></div>';
+          const marker = L.marker([car.lat, car.lng], {
+            icon: L.divIcon({
+              className: '',
+              html,
+              iconSize: [30, 30],
+              iconAnchor: [16, 16],
+            }),
+            zIndexOffset: 1000,
+          }).addTo(map);
+
+          liveCarMarkers.set(car.carId, marker);
+        });
+      };
+
+      const handleNativeMessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          if (message?.type === 'UPDATE_LIVE_CARS' && Array.isArray(message.cars)) {
+            updateLiveCarMarkers(message.cars);
+          }
+        } catch (messageError) {
+          console.warn('Unable to read native map message', messageError);
+        }
+      };
+
+      document.addEventListener('message', handleNativeMessage);
+      window.addEventListener('message', handleNativeMessage);
     </script>
   </body>
   </html>
   `;
+    const leafletSource = useMemo(() => ({ html: leafletHtml as any }), [leafletHtml]);
 
     const handleSelectRoute = (route: Route) => {
         setSelectedRoute(route);
@@ -539,7 +587,9 @@ export default function HomeScreen() {
                     allowFileAccess
                     allowingReadAccessToURL="file:///"
                     allowUniversalAccessFromFileURLs
-                    source={{ html: leafletHtml as any }}
+                    source={leafletSource}
+                    onLoadStart={() => setIsMapReady(false)}
+                    onLoadEnd={() => setIsMapReady(true)}
                     style={StyleSheet.absoluteFill}
                 />
 
