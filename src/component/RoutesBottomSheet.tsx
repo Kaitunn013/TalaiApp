@@ -15,6 +15,7 @@ const SHEET_HEIGHT = SCREEN_HEIGHT * 0.5;
 const HEADER_VISIBLE_HEIGHT = 100;
 const EXPANDED_TRANSLATE_Y = 0;
 const COLLAPSED_TRANSLATE_Y = SHEET_HEIGHT - HEADER_VISIBLE_HEIGHT;
+const ETA_DISPLAY_OFFSET_SECONDS = 10;
 
 const clampTranslateY = (value: number) =>
   Math.max(EXPANDED_TRANSLATE_Y, Math.min(COLLAPSED_TRANSLATE_Y, value));
@@ -48,8 +49,12 @@ const isParkingStopName = (name: string) => {
 
 const formatTimeToNextStop = (seconds: number | null | undefined) => {
   if (seconds === null || seconds === undefined || seconds < 0) return null;
-  const minutes = Math.max(1, Math.floor(seconds / 60));
-  return `<${minutes} นาที`;
+  const wholeSeconds = Math.floor(seconds);
+  const adjustedSeconds =
+    wholeSeconds > ETA_DISPLAY_OFFSET_SECONDS
+      ? wholeSeconds - ETA_DISPLAY_OFFSET_SECONDS
+      : wholeSeconds;
+  return `>${adjustedSeconds} วินาที`;
 };
 
 export default function RoutesBottomSheet({
