@@ -327,6 +327,9 @@ export default function HomeScreen() {
             : '';
 
     const filteredLiveCars = liveCars.filter((car) => {
+        const isActive = car.status.trim().toLowerCase() === 'active';
+        if (!isActive) return false;
+
         const rId = car.routeId || carRouteMap[car.carId];
         return rId === selectedRoute?.id;
     });
@@ -343,7 +346,7 @@ export default function HomeScreen() {
     }, [selectedRoute, liveCars, carRouteMap]);
 
     const selectedCar = selectedCarId
-        ? liveCars.find((car) => car.carId === selectedCarId) ?? null
+        ? filteredLiveCars.find((car) => car.carId === selectedCarId) ?? null
         : null;
 
     // ส่งเฉพาะข้อมูลตำแหน่งรถเข้า WebView โดยไม่สร้างแผนที่ใหม่
@@ -359,19 +362,20 @@ export default function HomeScreen() {
     }, [carsForMap, isMapReady]);
 
     useEffect(() => {
-        if (!hasReceivedWebSocketUpdate) {
-            // ไม่ใช้ตำแหน่งเก่าจาก API เป็นจุดเริ่มต้นของการคำนวณรอบทดสอบ
-            localProgressByCarRef.current = {};
-            setLocalNextStopSequence(null);
-            return;
-        }
-
         if (!selectedRoute || !selectedCar) {
             setLocalNextStopSequence(null);
             return;
         }
 
-        const previousState = localProgressByCarRef.current[selectedCar.carId];
+        // ใช้ตำแหน่งล่าสุดจาก API เป็นจุดเริ่มต้นได้ทันที
+        // จากนั้นจึงใช้ state เดิมต่อเมื่อมีตำแหน่งใหม่จาก WebSocket
+        if (!hasReceivedWebSocketUpdate) {
+            localProgressByCarRef.current = {};
+        }
+
+        const previousState = hasReceivedWebSocketUpdate
+            ? localProgressByCarRef.current[selectedCar.carId]
+            : undefined;
         const result = calculateLocalNextStop(
             selectedRoute,
             { lat: selectedCar.lat, lng: selectedCar.lng },
@@ -389,6 +393,7 @@ export default function HomeScreen() {
         console.log('[LOCAL] next stop calculated:', {
             carId: selectedCar.carId,
             routeId: selectedRoute.id,
+            source: hasReceivedWebSocketUpdate ? 'websocket' : 'api-initial',
             localNextStopSequence: result.nextStopSequence,
             nextStopName: result.nextStopName,
             distanceToNextStopMeters: Math.round(result.distanceToNextStopMeters),
@@ -607,6 +612,7 @@ export default function HomeScreen() {
                         onSelectRoute={handleSelectRoute}
                         selectedRouteId={selectedRoute?.id || null}
                         selectedCarId={selectedCarId}
+                        localNextStopSequence={localNextStopSequence}
                         onSelectCar={setSelectedCarId}
                         onSelectStop={handleSelectStop}
                         onOpen={fetchRouteFromApi}

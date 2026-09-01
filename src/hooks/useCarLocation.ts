@@ -116,6 +116,14 @@ export function useCarLocation(wsUrl = LIVE_LOCATIONS_WS_URL) {
                     const payload = JSON.parse(String(event.data));
                     const updates = normalizeLiveLocationMessage(payload);
                     console.log('[WS] message received:', updates.length, 'location(s)');
+                    console.log(
+                        '[WS] car status:',
+                        updates.map((car) => ({
+                            carId: car.carId,
+                            status: car.status,
+                            createdAt: car.createdAt,
+                        }))
+                    );
                     console.log('[WS] payload time/stop fields:', collectWebSocketTimeFields(payload));
                     if (updates.length === 0) return;
 

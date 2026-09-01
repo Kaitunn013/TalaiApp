@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -49,12 +49,53 @@ const isParkingStopName = (name: string) => {
 
 const formatTimeToNextStop = (seconds: number | null | undefined) => {
   if (seconds === null || seconds === undefined || seconds < 0) return null;
-  const wholeSeconds = Math.floor(seconds);
+  const wholeSeconds = Math.max(0, Math.floor(seconds));
   const adjustedSeconds =
     wholeSeconds > ETA_DISPLAY_OFFSET_SECONDS
       ? wholeSeconds - ETA_DISPLAY_OFFSET_SECONDS
       : wholeSeconds;
-  return `>${adjustedSeconds} วินาที`;
+  const minutes = Math.max(1, Math.ceil(adjustedSeconds / 60));
+  return `<${minutes} นาที`;
+};
+
+// คำนวณเวลาแบบสะสมจากป้ายถัดไป และวนต่อจากป้ายสุดท้ายกลับไปป้ายแรก
+// timeToNextSecs ของป้าย N คือเวลาเดินทางจากป้าย N ไปป้ายถัดไป
+const calculateStackedTimes = (
+  stops: Array<{ sequence: number; timeToNextSecs: number | null }>,
+  nextStopSequence: number | null | undefined,
+) => {
+  if (
+    nextStopSequence === null ||
+    nextStopSequence === undefined ||
+    !stops.some((stop) => stop.sequence === nextStopSequence)
+  ) {
+    return null;
+  }
+
+  const stackedTimes = new Map<number, number | null>(
+    stops.map((stop) => [stop.sequence, null]),
+  );
+  const nextStopIndex = stops.findIndex(
+    (stop) => stop.sequence === nextStopSequence,
+  );
+  let totalSeconds = 0;
+
+  for (let offset = 0; offset < stops.length; offset += 1) {
+    const targetIndex = (nextStopIndex + offset) % stops.length;
+    const targetStop = stops[targetIndex];
+    const previousStop = stops[(targetIndex - 1 + stops.length) % stops.length];
+    const legSeconds = previousStop.timeToNextSecs;
+
+    // ถ้าไม่มีเวลาเดินทางของช่วงใด จะคำนวณป้ายถัดจากช่วงนั้นต่อไม่ได้
+    if (legSeconds === null || !Number.isFinite(legSeconds) || legSeconds < 0) {
+      break;
+    }
+
+    totalSeconds += Math.floor(legSeconds);
+    stackedTimes.set(targetStop.sequence, totalSeconds);
+  }
+
+  return stackedTimes;
 };
 
 export default function RoutesBottomSheet({
@@ -63,6 +104,7 @@ export default function RoutesBottomSheet({
   onSelectRoute,
   selectedRouteId,
   selectedCarId,
+  localNextStopSequence,
   onSelectCar,
   onSelectStop,
   onOpen,
@@ -72,6 +114,7 @@ export default function RoutesBottomSheet({
   onSelectRoute: (route: Route) => void;
   selectedRouteId: string | null;
   selectedCarId?: string | null;
+  localNextStopSequence?: number | null;
   onSelectCar?: (carId: string | null) => void;
   onSelectStop?: (stop: { lat: number; lng: number; name?: string | null }) => void;
   onOpen?: () => void;
@@ -79,6 +122,81 @@ export default function RoutesBottomSheet({
   const translateY = useRef(new Animated.Value(EXPANDED_TRANSLATE_Y)).current;
   const lastTranslateY = useRef(EXPANDED_TRANSLATE_Y);
   const CARD_WIDTH = Math.round(Dimensions.get('window').width * 0.44);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const etaStartedAtRef = useRef<number | null>(null);
+  const etaContextKeyRef = useRef<string | null>(null);
+  const etaStartedAtByContextRef = useRef(new Map<string, number>());
+  const etaLastSequenceByRouteCarRef = useRef(new Map<string, number>());
+  const etaLapByRouteCarRef = useRef(new Map<string, number>());
+
+  // อัปเดตนาฬิกาเฉพาะใน BottomSheet เพื่อให้เวลาลดลงทุกวินาที
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // เริ่มจับเวลาใหม่เมื่อเปลี่ยนรถ เส้นทาง หรือป้ายถัดไปเท่านั้น
+  useEffect(() => {
+    if (
+      selectedRouteId === null ||
+      selectedCarId === null ||
+      selectedCarId === undefined ||
+      localNextStopSequence === null ||
+      localNextStopSequence === undefined
+    ) {
+      etaContextKeyRef.current = null;
+      etaStartedAtRef.current = null;
+      return;
+    }
+
+    const routeCarKey = `${selectedRouteId}:${selectedCarId}`;
+    const previousSequence = etaLastSequenceByRouteCarRef.current.get(routeCarKey);
+    let lap = etaLapByRouteCarRef.current.get(routeCarKey) ?? 0;
+    const isLoopTransition =
+      previousSequence !== undefined &&
+      localNextStopSequence === 1 &&
+      previousSequence > localNextStopSequence;
+
+    if (isLoopTransition) {
+      lap += 1;
+      etaLapByRouteCarRef.current.set(routeCarKey, lap);
+
+      // ล้าง timestamp ของรอบเก่า เพื่อไม่ให้ป้าย 2, 3, ... ใช้เวลาเดิมซ้ำ
+      for (const key of etaStartedAtByContextRef.current.keys()) {
+        if (key.startsWith(`${routeCarKey}:`)) {
+          etaStartedAtByContextRef.current.delete(key);
+        }
+      }
+    }
+
+    etaLastSequenceByRouteCarRef.current.set(routeCarKey, localNextStopSequence);
+
+    const contextKey = `${routeCarKey}:${lap}:${localNextStopSequence}`;
+    const savedStartedAt = etaStartedAtByContextRef.current.get(contextKey);
+
+    if (
+      etaContextKeyRef.current === contextKey &&
+      etaStartedAtRef.current === savedStartedAt
+    ) {
+      return;
+    }
+
+    const startedAt = savedStartedAt ?? Date.now();
+    if (savedStartedAt === undefined) {
+      etaStartedAtByContextRef.current.set(contextKey, startedAt);
+    }
+
+    etaContextKeyRef.current = contextKey;
+    etaStartedAtRef.current = startedAt;
+    setNowMs(Date.now());
+    console.log('[ETA] countdown context:', {
+      routeId: selectedRouteId,
+      carId: selectedCarId,
+      localNextStopSequence,
+      resumed: savedStartedAt !== undefined,
+      loop: lap,
+    });
+  }, [selectedRouteId, selectedCarId, localNextStopSequence]);
 
   useEffect(() => {
     translateY.setValue(EXPANDED_TRANSLATE_Y);
@@ -277,6 +395,19 @@ export default function RoutesBottomSheet({
 
           if (stopPoints.length === 0) return null;
 
+          const stackedTimes = calculateStackedTimes(
+            stopPoints,
+            localNextStopSequence,
+          );
+          const hasActiveCar = liveCars.some(
+            (car) => car.status.trim().toLowerCase() === 'active',
+          );
+          const etaStartedAt = etaStartedAtRef.current;
+          const elapsedSeconds =
+            stackedTimes !== null && etaStartedAt !== null
+              ? Math.max(0, (nowMs - etaStartedAt) / 1000)
+              : 0;
+
           return (
             <View style={styles.stopsContainer}>
               <View style={styles.stopsHeaderRow}>
@@ -316,7 +447,19 @@ export default function RoutesBottomSheet({
                 {stopPoints.map((stop, idx) => {
                   const isFirst = idx === 0;
                   const isLast = idx === stopPoints.length - 1;
-                  const timeToNext = formatTimeToNextStop(stop.timeToNextSecs);
+                  const stackedSecondsToStop = stackedTimes?.get(stop.sequence);
+                  const secondsToStop =
+                    stackedSecondsToStop !== null &&
+                    stackedSecondsToStop !== undefined &&
+                    stackedTimes !== null &&
+                    etaStartedAt !== null
+                      ? Math.max(0, stackedSecondsToStop - elapsedSeconds)
+                      : stackedTimes !== null
+                        ? stackedSecondsToStop
+                        : stop.timeToNextSecs;
+                  const timeToNext = hasActiveCar
+                    ? formatTimeToNextStop(secondsToStop)
+                    : '-';
                   return (
                     <TouchableOpacity
                       key={`${stop.sequence}-${idx}`}
