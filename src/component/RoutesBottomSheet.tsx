@@ -9,6 +9,10 @@ import {
   PanResponder,
   ScrollView,
 } from 'react-native';
+import {
+  getRouteStopOccurrences,
+  type LocalRouteStopOccurrence,
+} from '../utils/localStopProgress';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 const SHEET_HEIGHT = SCREEN_HEIGHT * 0.5;
@@ -62,11 +66,14 @@ const formatTimeToNextStop = (seconds: number | null | undefined) => {
 // timeToNextSecs ของป้าย N คือเวลาเดินทางจากป้าย N ไปป้ายถัดไป
 const calculateStackedTimes = (
   stops: Array<{ sequence: number; timeToNextSecs: number | null }>,
+  occurrences: LocalRouteStopOccurrence[],
   nextStopSequence: number | null | undefined,
+  nextStopPathIndex: number | null | undefined,
 ) => {
   if (
     nextStopSequence === null ||
     nextStopSequence === undefined ||
+    occurrences.length === 0 ||
     !stops.some((stop) => stop.sequence === nextStopSequence)
   ) {
     return null;
@@ -75,15 +82,22 @@ const calculateStackedTimes = (
   const stackedTimes = new Map<number, number | null>(
     stops.map((stop) => [stop.sequence, null]),
   );
-  const nextStopIndex = stops.findIndex(
-    (stop) => stop.sequence === nextStopSequence,
-  );
-  let totalSeconds = 0;
+  const nextStopIndex =
+    nextStopPathIndex === null || nextStopPathIndex === undefined
+      ? occurrences.findIndex((stop) => stop.sequence === nextStopSequence)
+      : occurrences.findIndex((stop) => stop.pathIndex === nextStopPathIndex);
 
-  for (let offset = 0; offset < stops.length; offset += 1) {
-    const targetIndex = (nextStopIndex + offset) % stops.length;
-    const targetStop = stops[targetIndex];
-    const previousStop = stops[(targetIndex - 1 + stops.length) % stops.length];
+  if (nextStopIndex < 0) return null;
+
+  let totalSeconds = 0;
+  const seenSequences = new Set<number>();
+
+  for (let offset = 0; offset < occurrences.length; offset += 1) {
+    const targetIndex = (nextStopIndex + offset) % occurrences.length;
+    const targetStop = occurrences[targetIndex];
+    const previousStop = occurrences[
+      (targetIndex - 1 + occurrences.length) % occurrences.length
+    ];
     const legSeconds = previousStop.timeToNextSecs;
 
     // ถ้าไม่มีเวลาเดินทางของช่วงใด จะคำนวณป้ายถัดจากช่วงนั้นต่อไม่ได้
@@ -92,7 +106,12 @@ const calculateStackedTimes = (
     }
 
     totalSeconds += Math.floor(legSeconds);
-    stackedTimes.set(targetStop.sequence, totalSeconds);
+    if (!seenSequences.has(targetStop.sequence)) {
+      stackedTimes.set(targetStop.sequence, totalSeconds);
+      seenSequences.add(targetStop.sequence);
+    }
+
+    if (seenSequences.size === stops.length) break;
   }
 
   return stackedTimes;
@@ -105,6 +124,7 @@ export default function RoutesBottomSheet({
   selectedRouteId,
   selectedCarId,
   localNextStopSequence,
+  localNextStopPathIndex,
   onSelectCar,
   onSelectStop,
   onOpen,
@@ -115,6 +135,7 @@ export default function RoutesBottomSheet({
   selectedRouteId: string | null;
   selectedCarId?: string | null;
   localNextStopSequence?: number | null;
+  localNextStopPathIndex?: number | null;
   onSelectCar?: (carId: string | null) => void;
   onSelectStop?: (stop: { lat: number; lng: number; name?: string | null }) => void;
   onOpen?: () => void;
@@ -126,7 +147,7 @@ export default function RoutesBottomSheet({
   const etaStartedAtRef = useRef<number | null>(null);
   const etaContextKeyRef = useRef<string | null>(null);
   const etaStartedAtByContextRef = useRef(new Map<string, number>());
-  const etaLastSequenceByRouteCarRef = useRef(new Map<string, number>());
+  const etaLastPathIndexByRouteCarRef = useRef(new Map<string, number>());
   const etaLapByRouteCarRef = useRef(new Map<string, number>());
 
   // อัปเดตนาฬิกาเฉพาะใน BottomSheet เพื่อให้เวลาลดลงทุกวินาที
@@ -142,7 +163,9 @@ export default function RoutesBottomSheet({
       selectedCarId === null ||
       selectedCarId === undefined ||
       localNextStopSequence === null ||
-      localNextStopSequence === undefined
+      localNextStopSequence === undefined ||
+      localNextStopPathIndex === null ||
+      localNextStopPathIndex === undefined
     ) {
       etaContextKeyRef.current = null;
       etaStartedAtRef.current = null;
@@ -150,12 +173,11 @@ export default function RoutesBottomSheet({
     }
 
     const routeCarKey = `${selectedRouteId}:${selectedCarId}`;
-    const previousSequence = etaLastSequenceByRouteCarRef.current.get(routeCarKey);
+    const previousPathIndex = etaLastPathIndexByRouteCarRef.current.get(routeCarKey);
     let lap = etaLapByRouteCarRef.current.get(routeCarKey) ?? 0;
     const isLoopTransition =
-      previousSequence !== undefined &&
-      localNextStopSequence === 1 &&
-      previousSequence > localNextStopSequence;
+      previousPathIndex !== undefined &&
+      localNextStopPathIndex < previousPathIndex;
 
     if (isLoopTransition) {
       lap += 1;
@@ -169,9 +191,9 @@ export default function RoutesBottomSheet({
       }
     }
 
-    etaLastSequenceByRouteCarRef.current.set(routeCarKey, localNextStopSequence);
+    etaLastPathIndexByRouteCarRef.current.set(routeCarKey, localNextStopPathIndex);
 
-    const contextKey = `${routeCarKey}:${lap}:${localNextStopSequence}`;
+    const contextKey = `${routeCarKey}:${lap}:${localNextStopPathIndex}`;
     const savedStartedAt = etaStartedAtByContextRef.current.get(contextKey);
 
     if (
@@ -193,10 +215,11 @@ export default function RoutesBottomSheet({
       routeId: selectedRouteId,
       carId: selectedCarId,
       localNextStopSequence,
+      localNextStopPathIndex,
       resumed: savedStartedAt !== undefined,
       loop: lap,
     });
-  }, [selectedRouteId, selectedCarId, localNextStopSequence]);
+  }, [selectedRouteId, selectedCarId, localNextStopSequence, localNextStopPathIndex]);
 
   useEffect(() => {
     translateY.setValue(EXPANDED_TRANSLATE_Y);
@@ -347,57 +370,32 @@ export default function RoutesBottomSheet({
 
         {(() => {
           const selectedRoute = routes.find((r) => r.id === selectedRouteId);
-          const stopPoints = selectedRoute
-            ? (() => {
-              const pathPoints = selectedRoute.pathPoints || [];
-              const seenCoords = new Set<string>();
-              const stops: {
-                sequence: number;
-                sortSequence: number;
-                name: string;
-                isParking: boolean;
-                timeToNextSecs: number | null;
-                lat: number;
-                lng: number;
-              }[] = [];
-
-              pathPoints.forEach((point) => {
-                // `sequence` exists on every route point. Only named points
-                // are actual stops, matching the markers shown on the map.
-                const pointName = point.name?.trim();
-                if (!pointName) {
-                  return;
-                }
-                const coordKey = `${point.lat.toFixed(6)},${point.lng.toFixed(6)}`;
-                if (seenCoords.has(coordKey)) {
-                  return;
-                }
-                seenCoords.add(coordKey);
-
-                const sortSequence = point.routestop_sequence ?? Number.MAX_SAFE_INTEGER;
-                const name = point.name || 'ไม่มีชื่อจุดจอด';
-                stops.push({
-                  sequence: 0,
-                  sortSequence,
-                  name,
-                  isParking: isParkingStopName(name),
-                  timeToNextSecs: point.timeToNextSecs ?? null,
-                  lat: point.lat,
-                  lng: point.lng,
-                });
-              });
-
-              return stops
-                .sort((a, b) => a.sortSequence - b.sortSequence)
-                .map((stop, index) => ({ ...stop, sequence: index + 1 }));
-            })()
+          const stopOccurrences = selectedRoute
+            ? getRouteStopOccurrences(selectedRoute)
             : [];
+          const seenSequences = new Set<number>();
+          const stopPoints = stopOccurrences
+            .filter((occurrence) => {
+              if (seenSequences.has(occurrence.sequence)) return false;
+              seenSequences.add(occurrence.sequence);
+              return true;
+            })
+            .map((occurrence) => ({
+              sequence: occurrence.sequence,
+              name: occurrence.name,
+              isParking: isParkingStopName(occurrence.name),
+              timeToNextSecs: occurrence.timeToNextSecs,
+              lat: occurrence.lat,
+              lng: occurrence.lng,
+            }));
 
           if (stopPoints.length === 0) return null;
 
           const stackedTimes = calculateStackedTimes(
             stopPoints,
+            stopOccurrences,
             localNextStopSequence,
+            localNextStopPathIndex,
           );
           const hasActiveCar = liveCars.some(
             (car) => car.status.trim().toLowerCase() === 'active',

@@ -21,22 +21,39 @@ export type LocalStopProgressState = {
     routeId: string;
     pathIndex: number;
     nextStopSequence: number;
+    nextStopPathIndex: number;
 };
 
 // ผลลัพธ์ที่ส่งกลับไปให้หน้าจอ เช่น ลำดับและชื่อป้ายถัดไป
 export type LocalNextStopResult = {
     nextStopSequence: number;
     nextStopName: string;
+    nextStopPathIndex: number;
     distanceToNextStopMeters: number;
     state: LocalStopProgressState;
 };
 
-type RouteStop = {
+export type LocalRouteStopOccurrence = {
     sequence: number;
     name: string;
     lat: number;
     lng: number;
     pathIndex: number;
+    timeToNextSecs: number | null;
+    occurrenceIndex: number;
+};
+
+const getStopIdentityKey = (
+    name: string,
+    lat: number,
+    lng: number,
+) => {
+    const normalizedName = name
+        .replace(/\s*(?:ขาไป|ขากลับ)\s*$/i, '')
+        .trim()
+        .toLowerCase();
+
+    return normalizedName || `${lat.toFixed(6)},${lng.toFixed(6)}`;
 };
 
 // แปลงองศาเป็นเรเดียน เพื่อใช้กับฟังก์ชันตรีโกณมิติ
@@ -69,68 +86,59 @@ const distanceInMeters = (
     return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
-// ดึงเฉพาะจุดที่เป็นป้ายรถจาก pathPoints และจัดลำดับป้ายใหม่เป็น 1, 2, 3...
-const getRouteStops = (route: Route): RouteStop[] => {
-    // ป้องกันป้ายข้อมูลซ้ำจาก API
-    const seenStopKeys = new Set<string>();
-
-    // ใช้หาพิกัดของป้ายแรก เพื่อตรวจว่าปลายทางใช้พิกัดเดียวกันหรือไม่
+// ดึง occurrence ของป้ายตามลำดับ pathPoints จริง
+// ป้ายเดิมที่ถูกผ่านซ้ำระหว่างขากลับจะใช้เลขป้ายเดิม แต่มี pathIndex คนละตัว
+export const getRouteStopOccurrences = (route: Route): LocalRouteStopOccurrence[] => {
+    const sequenceByStopKey = new Map<string, number>();
+    const occurrences: LocalRouteStopOccurrence[] = [];
     const firstNamedPointIndex = route.pathPoints.findIndex((point) => Boolean(point.name?.trim()));
     const firstNamedPoint = route.pathPoints[firstNamedPointIndex];
     const firstStopCoordinate = firstNamedPoint
         ? `${firstNamedPoint.lat.toFixed(6)},${firstNamedPoint.lng.toFixed(6)}`
         : null;
+    const firstStopKey = firstNamedPoint?.name?.trim()
+        ? getStopIdentityKey(firstNamedPoint.name.trim(), firstNamedPoint.lat, firstNamedPoint.lng)
+        : null;
+    let previousCoordinate: string | null = null;
 
-    return route.pathPoints
-        // เก็บ index เดิมไว้ เพราะต้องใช้บอกตำแหน่งบนเส้นทาง
-        .map((point, pathIndex) => ({ point, pathIndex }))
-        // เอาเฉพาะ path point ที่มีชื่อป้าย
-        .filter(({ point }) => Boolean(point.name?.trim()))
-        .filter(({ point, pathIndex }) => {
-            const coordinateKey = `${point.lat.toFixed(6)},${point.lng.toFixed(6)}`;
+    route.pathPoints.forEach((point, pathIndex) => {
+        const name = point.name?.trim();
+        if (!name) return;
 
-            // ปลายทางใช้พิกัดเดียวกับต้นทางและหมายถึงป้าย 1 เดียวกัน
-            // จึงไม่สร้างป้ายใหม่ซ้ำเมื่อวนกลับมาที่จุดเริ่มต้น
-            if (
-                pathIndex > firstNamedPointIndex &&
-                firstStopCoordinate !== null &&
-                coordinateKey === firstStopCoordinate
-            ) {
-                return false;
-            }
+        const coordinateKey = `${point.lat.toFixed(6)},${point.lng.toFixed(6)}`;
+        const stopKey = getStopIdentityKey(name, point.lat, point.lng);
 
-            // ใช้ sequence และชื่อป้ายช่วยตรวจข้อมูลซ้ำจาก API
-            const sequence = point.routestop_sequence ?? `path-${pathIndex}`;
-            const stopKey = `${sequence}|${point.name?.trim().toLowerCase() || ''}`;
-            if (seenStopKeys.has(stopKey)) return false;
-            seenStopKeys.add(stopKey);
-            return true;
-        })
-        // เรียงตามลำดับป้ายของ API ถ้ามีข้อมูล sequence
-        .sort((first, second) => {
-            const firstSequence = first.point.routestop_sequence;
-            const secondSequence = second.point.routestop_sequence;
+        // ไม่สร้าง occurrence ซ้ำสำหรับปลายทางที่ใช้พิกัดเดียวกับต้นทาง
+        if (
+            pathIndex > firstNamedPointIndex &&
+            ((firstStopCoordinate !== null && coordinateKey === firstStopCoordinate) ||
+                (firstStopKey !== null && stopKey === firstStopKey))
+        ) {
+            return;
+        }
 
-            if (
-                firstSequence !== null &&
-                firstSequence !== undefined &&
-                secondSequence !== null &&
-                secondSequence !== undefined &&
-                firstSequence !== secondSequence
-            ) {
-                return firstSequence - secondSequence;
-            }
+        // ป้องกันข้อมูลป้ายเดิมซ้ำติดกันใน pathPoints
+        if (coordinateKey === previousCoordinate) return;
+        previousCoordinate = coordinateKey;
 
-            return first.pathIndex - second.pathIndex;
-        })
-        // แปลงลำดับจาก API ให้เป็นลำดับที่ใช้บน Mobile เริ่มจาก 1
-        .map(({ point, pathIndex }, index) => ({
-            sequence: index + 1,
-            name: point.name?.trim() || 'ไม่มีชื่อจุดจอด',
+        let sequence = sequenceByStopKey.get(stopKey);
+        if (sequence === undefined) {
+            sequence = sequenceByStopKey.size + 1;
+            sequenceByStopKey.set(stopKey, sequence);
+        }
+
+        occurrences.push({
+            sequence,
+            name,
             lat: point.lat,
             lng: point.lng,
             pathIndex,
-    }));
+            timeToNextSecs: point.timeToNextSecs ?? null,
+            occurrenceIndex: occurrences.length,
+        });
+    });
+
+    return occurrences;
 };
 
 // หาว่า GPS ของรถอยู่ใกล้ path point ลำดับใดที่สุด
@@ -217,21 +225,21 @@ export const calculateLocalNextStop = (
     carLocation: { lat: number; lng: number },
     previousState?: LocalStopProgressState
 ): LocalNextStopResult | null => {
-    // เตรียมรายการป้ายที่เรียงตามเส้นทาง
-    const stops = getRouteStops(route);
+    // เตรียมรายการ occurrence ของป้ายตามลำดับเส้นทางจริง
+    const stopOccurrences = getRouteStopOccurrences(route);
 
     // หาตำแหน่ง path point ที่ใกล้รถที่สุด โดยใช้สถานะก่อนหน้าช่วยกันการย้อนกลับ
     const nearestPathIndex = findNearestPathIndex(route, carLocation, previousState);
 
     // ถ้าไม่มีป้ายหรือไม่มีตำแหน่งบนเส้นทาง ให้จบการคำนวณ
-    if (stops.length === 0 || nearestPathIndex === null) return null;
+    if (stopOccurrences.length === 0 || nearestPathIndex === null) return null;
 
     // เลือกป้ายแรกที่อยู่หลังตำแหน่งปัจจุบันบนเส้นทาง
-    const candidateIndex = Math.max(
-        0,
-        stops.findIndex((stop) => stop.pathIndex > nearestPathIndex)
+    const firstCandidateIndex = stopOccurrences.findIndex(
+        (stop) => stop.pathIndex > nearestPathIndex
     );
-    const candidateStop = stops[candidateIndex];
+    const candidateIndex = firstCandidateIndex >= 0 ? firstCandidateIndex : 0;
+    const candidateStop = stopOccurrences[candidateIndex];
 
     // คำนวณระยะจากรถถึงป้ายที่คาดว่าเป็นป้ายถัดไป
     const distanceToCandidate = distanceInMeters(carLocation, candidateStop);
@@ -240,39 +248,25 @@ export const calculateLocalNextStop = (
     // แล้วเลื่อนไปยังป้ายถัดไป
     const nextStopIndex =
         distanceToCandidate <= STOP_ARRIVAL_RADIUS_METERS
-            ? (candidateIndex + 1) % stops.length
+            ? (candidateIndex + 1) % stopOccurrences.length
             : candidateIndex;
-    const nextStop = stops[nextStopIndex];
-
-    // ป้องกันลำดับป้ายย้อนกลับจาก GPS แกว่งหรือการเลือก path ที่อยู่ใกล้กัน
-    // ยอมรับเฉพาะลำดับที่เท่าเดิมหรือมากกว่าเดิม
-    // ยกเว้นกรณีป้ายสุดท้ายวนกลับไปป้ายแรก เช่น 10 -> 1
-    const previousStop = previousState
-        ? stops.find((stop) => stop.sequence === previousState.nextStopSequence)
-        : undefined;
-    const isCompletingStopLoop =
-        previousStop?.sequence === stops.length && nextStop.sequence === 1;
-    const shouldKeepPreviousStop =
-        previousStop !== undefined &&
-        nextStop.sequence < previousStop.sequence &&
-        !isCompletingStopLoop;
-    const resolvedNextStop = shouldKeepPreviousStop ? previousStop : nextStop;
+    const nextStop = stopOccurrences[nextStopIndex];
 
     // บันทึกสถานะไว้ใช้ในการคำนวณ WebSocket ครั้งถัดไป
     const state: LocalStopProgressState = {
         routeId: route.id,
-        // ถ้าป้ายใหม่ย้อนกลับ ให้คง pathIndex เดิมไว้ด้วย
-        pathIndex: shouldKeepPreviousStop && previousState
-            ? previousState.pathIndex
-            : nearestPathIndex,
-        nextStopSequence: resolvedNextStop.sequence,
+        // ใช้ pathIndex เป็นตัวตัดสินความคืบหน้า ไม่ใช้เลขป้ายเพียงอย่างเดียว
+        pathIndex: nearestPathIndex,
+        nextStopSequence: nextStop.sequence,
+        nextStopPathIndex: nextStop.pathIndex,
     };
 
     // ส่งข้อมูลป้ายถัดไป ระยะทาง และสถานะล่าสุดกลับให้ HomeScreen
     return {
-        nextStopSequence: resolvedNextStop.sequence,
-        nextStopName: resolvedNextStop.name,
-        distanceToNextStopMeters: distanceInMeters(carLocation, resolvedNextStop),
+        nextStopSequence: nextStop.sequence,
+        nextStopName: nextStop.name,
+        nextStopPathIndex: nextStop.pathIndex,
+        distanceToNextStopMeters: distanceInMeters(carLocation, nextStop),
         state,
     };
 };

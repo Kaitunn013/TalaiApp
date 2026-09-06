@@ -75,6 +75,7 @@ export default function HomeScreen() {
     const [selectedRoute, setSelectedRoute] = useState<Route | null>(null);
     const [selectedCarId, setSelectedCarId] = useState<string | null>(null);
     const [localNextStopSequence, setLocalNextStopSequence] = useState<number | null>(null);
+    const [localNextStopPathIndex, setLocalNextStopPathIndex] = useState<number | null>(null);
     const [carRouteMap, setCarRouteMap] = useState<Record<string, string>>({});
     const {
         currentLocation: liveCars,
@@ -364,6 +365,7 @@ export default function HomeScreen() {
     useEffect(() => {
         if (!selectedRoute || !selectedCar) {
             setLocalNextStopSequence(null);
+            setLocalNextStopPathIndex(null);
             return;
         }
 
@@ -384,17 +386,20 @@ export default function HomeScreen() {
 
         if (!result) {
             setLocalNextStopSequence(null);
+            setLocalNextStopPathIndex(null);
             return;
         }
 
         localProgressByCarRef.current[selectedCar.carId] = result.state;
         setLocalNextStopSequence(result.nextStopSequence);
+        setLocalNextStopPathIndex(result.nextStopPathIndex);
 
         console.log('[LOCAL] next stop calculated:', {
             carId: selectedCar.carId,
             routeId: selectedRoute.id,
             source: hasReceivedWebSocketUpdate ? 'websocket' : 'api-initial',
             localNextStopSequence: result.nextStopSequence,
+            localNextStopPathIndex: result.nextStopPathIndex,
             nextStopName: result.nextStopName,
             distanceToNextStopMeters: Math.round(result.distanceToNextStopMeters),
         });
@@ -513,13 +518,81 @@ export default function HomeScreen() {
 
       // Keep live car markers inside the WebView and update only their coordinates.
       const liveCarMarkers = new Map();
+      const liveCarAnimations = new Map();
+      const LIVE_CAR_DEFAULT_ANIMATION_MS = 1000;
       const _busIconUri = ${JSON.stringify(markerIconUris.bus)};
+
+      const animateLiveCarMarker = (carId, marker, targetLat, targetLng) => {
+        const now = performance.now();
+        let animation = liveCarAnimations.get(carId);
+
+        if (!animation) {
+          animation = {
+            frameId: undefined,
+            startLat: marker.getLatLng().lat,
+            startLng: marker.getLatLng().lng,
+            targetLat,
+            targetLng,
+            startedAt: now,
+            lastUpdateAt: now,
+            duration: LIVE_CAR_DEFAULT_ANIMATION_MS,
+          };
+          liveCarAnimations.set(carId, animation);
+        } else {
+          const currentPosition = marker.getLatLng();
+          const updateInterval = now - animation.lastUpdateAt;
+
+          // Retarget from the marker's current position without cancelling the
+          // animation loop, so rapid WebSocket updates do not cause a jump.
+          animation.startLat = currentPosition.lat;
+          animation.startLng = currentPosition.lng;
+          animation.targetLat = targetLat;
+          animation.targetLng = targetLng;
+          animation.startedAt = now;
+          animation.lastUpdateAt = now;
+          animation.duration = Math.min(
+            5000,
+            Math.max(120, updateInterval * 1.05),
+          );
+        }
+
+        const animate = (frameTime) => {
+          const currentAnimation = liveCarAnimations.get(carId);
+          if (currentAnimation !== animation) return;
+
+          const progress = Math.min(
+            1,
+            (frameTime - animation.startedAt) / animation.duration,
+          );
+          // Linear movement keeps the vehicle speed visually consistent.
+          const lat = animation.startLat +
+            (animation.targetLat - animation.startLat) * progress;
+          const lng = animation.startLng +
+            (animation.targetLng - animation.startLng) * progress;
+          marker.setLatLng([lat, lng]);
+
+          if (progress < 1) {
+            animation.frameId = requestAnimationFrame(animate);
+          } else {
+            animation.frameId = undefined;
+          }
+        };
+
+        if (animation.frameId === undefined) {
+          animation.frameId = requestAnimationFrame(animate);
+        }
+      };
 
       const updateLiveCarMarkers = (cars) => {
         const activeCarIds = new Set(cars.map((car) => car.carId));
 
         liveCarMarkers.forEach((marker, carId) => {
           if (!activeCarIds.has(carId)) {
+            const animation = liveCarAnimations.get(carId);
+            if (animation?.frameId !== undefined) {
+              cancelAnimationFrame(animation.frameId);
+            }
+            liveCarAnimations.delete(carId);
             map.removeLayer(marker);
             liveCarMarkers.delete(carId);
           }
@@ -529,7 +602,7 @@ export default function HomeScreen() {
           const existingMarker = liveCarMarkers.get(car.carId);
 
           if (existingMarker) {
-            existingMarker.setLatLng([car.lat, car.lng]);
+            animateLiveCarMarker(car.carId, existingMarker, car.lat, car.lng);
             return;
           }
 
@@ -613,6 +686,7 @@ export default function HomeScreen() {
                         selectedRouteId={selectedRoute?.id || null}
                         selectedCarId={selectedCarId}
                         localNextStopSequence={localNextStopSequence}
+                        localNextStopPathIndex={localNextStopPathIndex}
                         onSelectCar={setSelectedCarId}
                         onSelectStop={handleSelectStop}
                         onOpen={fetchRouteFromApi}
