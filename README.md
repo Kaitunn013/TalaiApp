@@ -1,56 +1,115 @@
-# Welcome to your Expo app 👋
+# TalaiApp
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+TalaiApp เป็นแอปพลิเคชันมือถือสำหรับติดตามรถโดยสารรับส่งภายในมหาวิทยาลัยเกษตรศาสตร์ วิทยาเขตกำแพงแสน โดยแสดงเส้นทางรถ ตำแหน่งรถ จุดจอด และเวลาประมาณการที่รถจะมาถึงแบบ Real-time เพื่อช่วยให้นิสิตและบุคลากรวางแผนการเดินทางภายในมหาวิทยาลัยได้สะดวกขึ้น
 
-## Get started
+## ฟีเจอร์หลัก
 
-1. Install dependencies
+- แสดงตำแหน่งรถโดยสารบนแผนที่แบบ Real-time
+- เลือกและสลับระหว่างสายรถโดยสารต่าง ๆ
+- แสดงเส้นทาง ลำดับจุดจอด ชื่อจุดจอด และตำแหน่งของแต่ละจุด
+- แสดงสถานะรถ เช่น Active และ Inactive
+- แสดงเวลาประมาณการที่รถจะมาถึงจุดจอดถัดไป
+- รองรับการเลือกดูรถแต่ละคันเมื่อมีรถหลายคันในเส้นทางเดียวกัน
+- แสดงรายละเอียดเส้นทางและจุดจอดผ่าน Bottom Sheet
+- เชื่อมต่อ WebSocket ใหม่โดยอัตโนมัติเมื่อการเชื่อมต่อขัดข้อง
 
-   ```bash
-   npm install
-   ```
+## การทำงานของระบบ
 
-2. Start the app
+1. แอปโหลดข้อมูลเส้นทางและตำแหน่งรถล่าสุดผ่าน REST API
+2. แอปเชื่อมต่อกับ WebSocket สำหรับรับข้อมูลตำแหน่งรถแบบ Real-time โดยใช้ Mobile Token
+3. ข้อมูลตำแหน่งรถที่ได้รับจะถูกแปลงให้อยู่ในรูปแบบมาตรฐานและแสดงบนแผนที่
+4. เส้นทางที่เลือกและลำดับจุดจอดจะอัปเดตพร้อมเวลาประมาณการแบบ Real-time
 
-   ```bash
-   npx expo start
-   ```
+## เทคโนโลยีที่ใช้
 
-In the output, you'll find options to open the app in a
+- React Native
+- Expo SDK 54
+- TypeScript
+- Expo Router
+- React Navigation
+- React Native Maps
+- Expo Location
+- WebSocket
+- REST API
+- รองรับ Android, iOS และ Web ผ่าน Expo
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
+## โครงสร้างโปรเจค
 
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```text
+TalaiApp/
+├── app/                         # จุดเริ่มต้นของ Expo Router
+├── src/
+│   ├── component/
+│   │   ├── RoutesBottomSheet.tsx
+│   │   └── SplashScreen.tsx
+│   ├── hooks/
+│   │   └── useCarLocation.ts    # โหลดตำแหน่งรถและรับข้อมูลแบบ Real-time
+│   ├── services/
+│   │   └── talaiApi.ts          # เชื่อมต่อ REST API และแปลงข้อมูล
+│   ├── utils/
+│   │   └── localStopProgress.ts # คำนวณจุดจอดและเวลาโดยประมาณ
+│   └── HomeScreen.tsx            # หน้าหลักและแผนที่
+├── App.tsx
+└── package.json
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## วิธีติดตั้งและใช้งาน
 
-### Other setup steps
+### สิ่งที่ต้องติดตั้ง
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+- Node.js และ npm
+- Android Studio พร้อม Emulator หรือ iOS Simulator
+- Expo Go สำหรับทดสอบบนอุปกรณ์มือถือ
+- สิทธิ์เข้าถึง Backend API และ WebSocket ของระบบ Talai
 
-## Learn more
+### ติดตั้งโปรเจค
 
-To learn more about developing your project with Expo, look at the following resources:
+```bash
+git clone https://github.com/Kaitunn013/TalaiApp.git
+cd TalaiApp
+npm install
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+สร้างไฟล์ `.env.local` ไว้ที่ root ของโปรเจค:
 
-## Join the community
+```env
+EXPO_PUBLIC_API_URL=https://api.talai-kukps.app
+EXPO_PUBLIC_WS_URL=wss://api.talai-kukps.app
+EXPO_PUBLIC_MOBILE_TOKEN=your_mobile_token
+```
 
-Join our community of developers creating universal apps.
+เริ่มต้น Development Server:
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+```bash
+npx expo start
+```
+
+คำสั่งอื่นที่ใช้ได้:
+
+```bash
+npm run android
+npm run ios
+npm run web
+npm run lint
+```
+
+## API ที่แอปใช้งาน
+
+แอปมือถือเชื่อมต่อกับ Backend ผ่าน API ดังต่อไปนี้:
+
+- `GET /routes` — โหลดข้อมูลสายรถโดยสาร
+- `GET /route-points/by-route/:routeId` — โหลดข้อมูลจุดจอดตามเส้นทาง
+- `GET /cars` — โหลดข้อมูลรถโดยสาร
+- `GET /cars/live-positions` — โหลดตำแหน่งรถล่าสุด
+- `WebSocket` — รับข้อมูลตำแหน่งรถแบบ Real-time
+
+ทุก Request จะส่ง Header `x-mobile-token` เพื่อยืนยันสิทธิ์ของ Mobile Client
+
+## Repository ที่เกี่ยวข้อง
+
+- [Talai Admin Web](https://github.com/THEkingmay/kukps-talai-web) — เว็บไซต์สำหรับผู้ดูแลระบบ ใช้จัดการข้อมูลรถและเส้นทาง
+- [Talai Backend](https://github.com/THEkingmay/talai-kukps-backend) — Backend API และบริการส่งข้อมูลตำแหน่งรถแบบ Real-time
+
+## หมายเหตุด้านความปลอดภัย
+
+ไม่ควร Commit ไฟล์ `.env.local`, Mobile Token หรือข้อมูลรับรองอื่น ๆ ลงใน Repository ควรใช้ Environment Variables สำหรับการตั้งค่าในแต่ละสภาพแวดล้อม
