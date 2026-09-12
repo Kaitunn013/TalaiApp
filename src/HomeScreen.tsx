@@ -15,6 +15,8 @@ import {
 } from './services/talaiApi';
 import {
     calculateLocalNextStop,
+    getDistanceToRouteMeters,
+    MAX_ROUTE_DISTANCE_METERS,
     type LocalStopProgressState,
 } from './utils/localStopProgress';
 
@@ -28,6 +30,7 @@ type MarkerIconUris = {
     bus: string;
 };
 
+const OFF_ROUTE_GRACE_PERIOD_MS = 15_000;
 
 const loadImageAsDataUri = async (assetModule: number, fallbackUri: string): Promise<string> => {
     try {
@@ -90,6 +93,7 @@ export default function HomeScreen() {
     const initialCarSelectedRef = useRef(false);
     const webViewRef = useRef<React.ElementRef<typeof WebView>>(null);
     const localProgressByCarRef = useRef<Record<string, LocalStopProgressState>>({});
+    const [offRouteSinceByKey, setOffRouteSinceByKey] = useState<Record<string, number>>({});
 
     useEffect(() => {
         if (locationError) setError(locationError);
@@ -332,8 +336,86 @@ export default function HomeScreen() {
         if (!isActive) return false;
 
         const rId = car.routeId || carRouteMap[car.carId];
-        return rId === selectedRoute?.id;
+        if (rId !== selectedRoute?.id || !selectedRoute) return false;
+
+        const distanceToRoute = getDistanceToRouteMeters(selectedRoute, {
+            lat: car.lat,
+            lng: car.lng,
+        });
+        const offRouteSince = offRouteSinceByKey[`${selectedRoute.id}:${car.carId}`];
+
+        if (offRouteSince === 0) return false;
+
+        return (
+            distanceToRoute !== null &&
+            (distanceToRoute <= MAX_ROUTE_DISTANCE_METERS ||
+                offRouteSince === undefined ||
+                (offRouteSince > 0 &&
+                    Date.now() - offRouteSince < OFF_ROUTE_GRACE_PERIOD_MS))
+        );
     });
+
+    // เริ่มจับเวลาเมื่อรถ active แต่หลุดจากเส้นทาง และล้างเมื่อกลับเข้าเส้นทาง
+    useEffect(() => {
+        if (!selectedRoute) return;
+
+        setOffRouteSinceByKey((current) => {
+            const next = { ...current };
+            const eligibleKeys = new Set<string>();
+            let changed = false;
+
+            liveCars.forEach((car) => {
+                if (car.status.trim().toLowerCase() !== 'active') return;
+
+                const routeId = car.routeId || carRouteMap[car.carId];
+                if (routeId !== selectedRoute.id) return;
+
+                const key = `${selectedRoute.id}:${car.carId}`;
+                eligibleKeys.add(key);
+                const distanceToRoute = getDistanceToRouteMeters(selectedRoute, {
+                    lat: car.lat,
+                    lng: car.lng,
+                });
+                const isOnRoute =
+                    distanceToRoute !== null &&
+                    distanceToRoute <= MAX_ROUTE_DISTANCE_METERS;
+
+                if (isOnRoute) {
+                    if (next[key] !== undefined) {
+                        delete next[key];
+                        changed = true;
+                    }
+                } else if (next[key] === undefined) {
+                    next[key] = Date.now();
+                    changed = true;
+                }
+            });
+
+            Object.keys(next).forEach((key) => {
+                if (!eligibleKeys.has(key)) {
+                    delete next[key];
+                    changed = true;
+                }
+            });
+
+            return changed ? next : current;
+        });
+    }, [liveCars, selectedRoute, carRouteMap]);
+
+    // บังคับให้กรองรถใหม่เมื่อครบ grace period แม้ไม่มี WebSocket message ใหม่
+    useEffect(() => {
+        const timers = Object.entries(offRouteSinceByKey)
+            .filter(([, since]) => since > 0)
+            .map(([key, since]) =>
+                setTimeout(() => {
+                    setOffRouteSinceByKey((current) =>
+                        current[key] === since ? { ...current, [key]: 0 } : current
+                    );
+                }, Math.max(0, OFF_ROUTE_GRACE_PERIOD_MS - (Date.now() - since)))
+            );
+
+        return () => timers.forEach(clearTimeout);
+    }, [offRouteSinceByKey]);
 
     useEffect(() => {
         if (selectedRoute && filteredLiveCars.length > 0) {
@@ -344,7 +426,7 @@ export default function HomeScreen() {
         } else {
             setSelectedCarId(null);
         }
-    }, [selectedRoute, liveCars, carRouteMap]);
+    }, [selectedRoute, liveCars, carRouteMap, offRouteSinceByKey]);
 
     const selectedCar = selectedCarId
         ? filteredLiveCars.find((car) => car.carId === selectedCarId) ?? null
@@ -405,9 +487,7 @@ export default function HomeScreen() {
         });
     }, [hasReceivedWebSocketUpdate, selectedCar, selectedRoute]);
 
-    const mapRoutePoints = selectedRoute?.name?.trim() === 'สายหน้ามอ'
-        ? routes.find((route) => (route.name || '').trim() === 'สายหอใน')?.pathPoints ?? selectedRoute?.pathPoints ?? []
-        : selectedRoute?.pathPoints ?? [];
+    const mapRoutePoints = selectedRoute?.pathPoints ?? [];
     const mapRoutePointsString = mapRoutePoints.map((point) => `[${point.lat}, ${point.lng}]`).join(', ');
 
     const leafletHtml = `

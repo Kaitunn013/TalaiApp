@@ -397,9 +397,12 @@ export default function RoutesBottomSheet({
             localNextStopSequence,
             localNextStopPathIndex,
           );
-          const hasActiveCar = liveCars.some(
-            (car) => car.status.trim().toLowerCase() === 'active',
-          );
+          const hasActiveCar =
+            localNextStopSequence !== null &&
+            localNextStopSequence !== undefined &&
+            localNextStopPathIndex !== null &&
+            localNextStopPathIndex !== undefined &&
+            liveCars.some((car) => car.status.trim().toLowerCase() === 'active');
           const etaStartedAt = etaStartedAtRef.current;
           const elapsedSeconds =
             stackedTimes !== null && etaStartedAt !== null

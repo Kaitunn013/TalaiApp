@@ -15,6 +15,9 @@ const PATH_FORWARD_LOOKAHEAD = 12;
 // ถ้ารถเพิ่งเริ่มส่งตำแหน่ง ให้ถือว่าอยู่ช่วงต้นเส้นทางก่อน
 const START_END_AMBIGUITY_RADIUS_METERS = 80;
 
+// ถ้าอยู่นอกระยะนี้ จะไม่ถือว่าเป็นรถบนเส้นทาง
+export const MAX_ROUTE_DISTANCE_METERS = 100;
+
 // ข้อมูลสถานะที่ต้องจำไว้ระหว่างการคำนวณแต่ละครั้ง
 // เพื่อให้การคำนวณครั้งใหม่รู้ว่ารถอยู่ตรงไหนของเส้นทางก่อนหน้า
 export type LocalStopProgressState = {
@@ -84,6 +87,56 @@ const distanceInMeters = (
             Math.sin(longitudeDelta / 2) ** 2;
 
     return 2 * earthRadiusMeters * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+// คำนวณระยะจากรถถึงเส้นช่วงระหว่าง path point สองจุด
+// ใช้พิกัดระนาบเฉพาะบริเวณเพื่อฉายตำแหน่งรถลงบนแต่ละช่วงของเส้นทาง
+export const getDistanceToRouteMeters = (
+    route: Route,
+    carLocation: { lat: number; lng: number }
+) => {
+    const { pathPoints } = route;
+    if (pathPoints.length === 0) return null;
+    if (pathPoints.length === 1) return distanceInMeters(carLocation, pathPoints[0]);
+
+    const metersPerDegreeLat = 111320;
+    const metersPerDegreeLng =
+        metersPerDegreeLat * Math.cos(toRadians(carLocation.lat));
+    const toLocalMeters = (point: { lat: number; lng: number }) => ({
+        x: (point.lng - carLocation.lng) * metersPerDegreeLng,
+        y: (point.lat - carLocation.lat) * metersPerDegreeLat,
+    });
+
+    let nearestDistanceSquared = Number.POSITIVE_INFINITY;
+
+    for (let index = 0; index < pathPoints.length - 1; index += 1) {
+        const start = toLocalMeters(pathPoints[index]);
+        const end = toLocalMeters(pathPoints[index + 1]);
+        const segmentX = end.x - start.x;
+        const segmentY = end.y - start.y;
+        const segmentLengthSquared = segmentX ** 2 + segmentY ** 2;
+        const projection =
+            segmentLengthSquared === 0
+                ? 0
+                : Math.max(
+                      0,
+                      Math.min(
+                          1,
+                          (-start.x * segmentX - start.y * segmentY) /
+                              segmentLengthSquared
+                      )
+                  );
+        const nearestX = start.x + segmentX * projection;
+        const nearestY = start.y + segmentY * projection;
+        const distanceSquared = nearestX ** 2 + nearestY ** 2;
+
+        nearestDistanceSquared = Math.min(
+            nearestDistanceSquared,
+            distanceSquared
+        );
+    }
+
+    return Math.sqrt(nearestDistanceSquared);
 };
 
 // ดึง occurrence ของป้ายตามลำดับ pathPoints จริง
@@ -229,10 +282,16 @@ export const calculateLocalNextStop = (
     const stopOccurrences = getRouteStopOccurrences(route);
 
     // หาตำแหน่ง path point ที่ใกล้รถที่สุด โดยใช้สถานะก่อนหน้าช่วยกันการย้อนกลับ
+    const distanceToRoute = getDistanceToRouteMeters(route, carLocation);
     const nearestPathIndex = findNearestPathIndex(route, carLocation, previousState);
 
-    // ถ้าไม่มีป้ายหรือไม่มีตำแหน่งบนเส้นทาง ให้จบการคำนวณ
-    if (stopOccurrences.length === 0 || nearestPathIndex === null) return null;
+    // ถ้ารถอยู่นอกเส้นทางมากกว่า 100 เมตร จะไม่คำนวณป้ายถัดไป
+    if (
+        stopOccurrences.length === 0 ||
+        nearestPathIndex === null ||
+        distanceToRoute === null ||
+        distanceToRoute > MAX_ROUTE_DISTANCE_METERS
+    ) return null;
 
     // เลือกป้ายแรกที่อยู่หลังตำแหน่งปัจจุบันบนเส้นทาง
     const firstCandidateIndex = stopOccurrences.findIndex(
